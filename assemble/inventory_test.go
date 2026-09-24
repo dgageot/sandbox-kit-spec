@@ -103,6 +103,26 @@ func TestCheckCollisionsCanonicalizesSharedFiles(t *testing.T) {
 	require.EqualError(t, err, "kit file collisions:\n  /opt/tools/file: contributed by workload and mixin")
 }
 
+func TestCheckCollisionsDeduplicatesKits(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		files []string
+	}{
+		{"repeated path", []string{"opt/tool", "opt/tool"}},
+		{"canonical equivalents", []string{"opt/tool", "opt/./tool", "opt//tool"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := CheckCollisions([]Inventory{
+				{Kit: "base", Files: []string{"opt/tool", "opt/tool"}},
+				{Kit: "mixin", Files: tc.files},
+				{Kit: "other", Files: []string{"opt/tool", "opt/tool"}},
+				{Kit: "mixin", Files: []string{"opt/tool"}},
+			})
+			require.EqualError(t, err, "kit file collisions:\n  /opt/tool: contributed by base and mixin and other")
+		})
+	}
+}
+
 func TestCheckCollisionsRejectsDeletionOfAnEarlierMixin(t *testing.T) {
 	err := CheckCollisions([]Inventory{
 		{Kit: "workload", Files: []string{"bin/sh"}},

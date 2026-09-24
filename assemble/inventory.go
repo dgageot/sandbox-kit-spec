@@ -391,7 +391,9 @@ func CheckCollisions(inventories []Inventory) error {
 				if len(collisions[f]) == 0 {
 					collisions[f] = []string{prev}
 				}
-				collisions[f] = append(collisions[f], inv.Kit)
+				if !slices.Contains(collisions[f], inv.Kit) {
+					collisions[f] = append(collisions[f], inv.Kit)
+				}
 			}
 		}
 	}
