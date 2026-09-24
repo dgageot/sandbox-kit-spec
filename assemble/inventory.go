@@ -8,7 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"sort"
+	"path"
+	"slices"
 	"strings"
 
 	"github.com/klauspost/compress/zstd"
@@ -17,7 +18,8 @@ import (
 // Inventory is the set of non-directory paths one kit's layers contribute,
 // normalized (no leading "./" or "/"). Directories are excluded because
 // overlapping directories are how composition works; overlapping files are
-// how it breaks.
+// how it breaks. Files includes literal whiteout markers and historical
+// contributions; layer boundaries are not retained.
 type Inventory struct {
 	Kit   string
 	Files []string
@@ -28,11 +30,6 @@ type Inventory struct {
 // chose zstd compression, so the inventory reader sniffs it beside gzip.
 var zstdMagic = []byte{0x28, 0xb5, 0x2f, 0xfd}
 
-// ReadInventory lists the non-directory entries of one layer blob (tar,
-// tar+gzip, or tar+zstd — sniffed by magic bytes, since callers hand over
-// blob bytes without their manifest media type). Whiteout entries are
-// included: a mixin deleting another kit's file is exactly the collision
-// the check exists to catch.
 // LayerLink is a link entry's identity within a layer listing.
 type LayerLink struct {
 	Target string
@@ -91,6 +88,9 @@ func ReadLayerEntries(r io.Reader) (files, dirs []string, links map[string]Layer
 	return files, dirs, links, nil
 }
 
+// ReadInventory lists the non-directory entries of one layer blob (tar,
+// tar+gzip, or tar+zstd — sniffed by magic bytes). Whiteout markers retain
+// their literal names so CheckCollisions can judge cross-kit deletions.
 func ReadInventory(r io.Reader) ([]string, error) {
 	tr, closeLayer, err := openLayer(r)
 	if err != nil {
@@ -340,17 +340,49 @@ func normalizePath(p string) string {
 	return strings.TrimPrefix(p, "/")
 }
 
-// CheckCollisions rejects a composition in which two kits contribute the
-// same file. Directory overlap is fine — that is what composing overlays
-// means — but a file owned twice has no principled winner: layer order
-// would decide silently, and the design chooses a loud error over a silent
-// coin flip. Paths within one kit may repeat (its own layers already
-// resolved by its own order).
+// CheckCollisions checks inventories in composition order, rejecting files
+// contributed by multiple kits and whiteouts deleting earlier kits' files.
+// Shared directories and a kit changing its own files are allowed. Without
+// layer boundaries, ownership conservatively includes every contributed
+// file, even one the kit later removed from its own layers. Paths are cleaned
+// for comparison without modifying the inventories.
 func CheckCollisions(inventories []Inventory) error {
 	owner := map[string]string{}
 	collisions := map[string][]string{}
+	var problems []string
 	for _, inv := range inventories {
+		// Check removals before recording this kit's files: a whiteout
+		// must not hide a file contributed beside it in the same layer.
+		for _, marker := range inv.Files {
+			marker = normalizePath(path.Clean(marker))
+			base := path.Base(marker)
+			if !strings.HasPrefix(base, ".wh.") {
+				continue
+			}
+			if base == ".wh." {
+				return fmt.Errorf("kit %s: whiteout /%s has no target", inv.Kit, marker)
+			}
+			opaque := base == ".wh..wh..opq"
+			target := path.Join(path.Dir(marker), strings.TrimPrefix(base, ".wh."))
+			if opaque {
+				target = path.Dir(marker)
+			}
+			for f, kit := range owner {
+				if kit == inv.Kit {
+					continue
+				}
+				// OCI root opacity hides all lower-layer children.
+				if (!opaque && f == target) || strings.HasPrefix(f, target+"/") || (opaque && target == ".") {
+					problems = append(problems, fmt.Sprintf("/%s: %s removes a path contributed by %s (whiteout /%s)",
+						f, inv.Kit, kit, marker))
+				}
+			}
+		}
 		for _, f := range inv.Files {
+			f = normalizePath(path.Clean(f))
+			if strings.HasPrefix(path.Base(f), ".wh.") {
+				continue
+			}
 			prev, taken := owner[f]
 			switch {
 			case !taken:
@@ -363,19 +395,13 @@ func CheckCollisions(inventories []Inventory) error {
 			}
 		}
 	}
-	if len(collisions) == 0 {
+	for p, kits := range collisions {
+		problems = append(problems, fmt.Sprintf("/%s: contributed by %s", p, strings.Join(kits, " and ")))
+	}
+	if len(problems) == 0 {
 		return nil
 	}
 
-	paths := make([]string, 0, len(collisions))
-	for p := range collisions {
-		paths = append(paths, p)
-	}
-	sort.Strings(paths)
-	var b strings.Builder
-	b.WriteString("kit file collisions:")
-	for _, p := range paths {
-		fmt.Fprintf(&b, "\n  /%s: contributed by %s", p, strings.Join(collisions[p], " and "))
-	}
-	return errors.New(b.String())
+	slices.Sort(problems)
+	return fmt.Errorf("kit file collisions:\n  %s", strings.Join(slices.Compact(problems), "\n  "))
 }
