@@ -1425,7 +1425,7 @@ args:
   host:
     default: api.example.com
 capabilities:
-  - type: com.docker.sandbox/network-policy@1
+  - type: com.docker.sandbox/network-policy@2
     config:
       runtime:
         allow:
@@ -1439,6 +1439,8 @@ capabilities:
 		require.NoError(t, err)
 		_, err = ValidateRaw(raw, d)
 		require.ErrorContains(t, err, want, "entry %s", entry)
+		_, err = ValidatePublished(raw, d)
+		require.ErrorContains(t, err, want, "published entry %s", entry)
 	}
 
 	refuse(`{hosts: ["${{ kit.args.host }}"], methods: []}`, "empty methods list")
@@ -1453,4 +1455,6 @@ capabilities:
 	require.NoError(t, err)
 	_, err = ValidateRaw(raw, d)
 	require.NoError(t, err, "whether the method is an HTTP verb is not knowable yet")
+	_, err = ValidatePublished(raw, d)
+	require.NoError(t, err, "published entries still defer value checks until expansion")
 }
