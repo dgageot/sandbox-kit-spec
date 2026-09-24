@@ -24,7 +24,8 @@ TRACKED=(claude claude-mixin codex codex-mixin gemini-mixin opencode opencode-mi
 # one has to satisfy the range the adapter declares. Moving the pin
 # without the floor publishes an adapter whose metadata lies about what
 # it can drive, so the report names it and a person raises both.
-COUPLED=(codex-acp)
+# Claude's CLI pin moves with examples/claude/sessions/package{,-lock}.json.
+COUPLED=(codex-acp claude)
 
 usage() {
 	cat >&2 <<'EOF'
@@ -136,7 +137,7 @@ update() {
 	fi
 	if coupled "$kit"; then
 		[ "$have" = "$latest" ] ||
-			printf '%s: %s is out, but its pin moves with the requires floor beside it — raise both by hand\n' \
+			printf '%s: %s is out, but its coupled dependency pins must be updated by hand\n' \
 				"$kit" "$latest" >&2
 		printf '%s\n' "$have"
 		return
@@ -166,7 +167,7 @@ check() {
 		elif [ "$have" = "$latest" ]; then
 			status=ok
 		elif coupled "$kit"; then
-			status="OUTDATED (latest $latest, raise with its requires floor)"
+			status="OUTDATED (latest $latest, update coupled dependency pins)"
 		else
 			status="OUTDATED (latest $latest)"
 		fi

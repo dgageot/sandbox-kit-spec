@@ -22,6 +22,10 @@ RUN case "$TARGETARCH" in \
  && chmod 0755 "/home/agent/.local/share/claude/versions/${CLAUDE_VERSION}" \
  && ln -sfn "/home/agent/.local/share/claude/versions/${CLAUDE_VERSION}" /home/agent/.local/bin/claude \
  && chown -R agent:agent /home/agent/.local
+# Use the session API without installing another Claude binary.
+COPY sessions/package.json sessions/package-lock.json /opt/claude-sessions/
+RUN npm ci --prefix /opt/claude-sessions --cache /root/.npm --omit=optional --omit=peer --ignore-scripts --no-audit --no-fund
+COPY sessions/claude-sessions.mjs /opt/claude-sessions/
 # v2's environment.variables, in the slot OCI already owns for static env.
 ENV IS_SANDBOX=1
 USER agent

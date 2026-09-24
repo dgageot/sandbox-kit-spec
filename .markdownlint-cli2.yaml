@@ -7,3 +7,4 @@ globs:
 # than in a .markdownlintignore, which markdownlint-cli2 does not read.
 ignores:
   - "tck/**/testdata/**"
+  - "**/node_modules/**"

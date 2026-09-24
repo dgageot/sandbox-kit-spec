@@ -82,6 +82,13 @@ tasks:
         packages=$(go list ./...)
         go test $(printf '%s\n' "$packages" | grep -v /tck/sandbox)
 
+  test:claude-sessions:
+    desc: Test Claude session listing against the pinned Agent SDK
+    dir: examples/claude/sessions
+    cmds:
+      - npm ci --omit=optional --omit=peer --ignore-scripts --no-audit --no-fund
+      - npm test
+
   test:tck:
     desc: The sandbox conformance suite, judged against the fake adapter
     cmds:

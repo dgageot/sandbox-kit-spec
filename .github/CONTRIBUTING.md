@@ -18,12 +18,13 @@ which appends a `Signed-off-by` trailer matching your `user.name` and
 ## Building and testing
 
 The repository uses [Task](https://taskfile.dev). `task --list` shows
-everything; the three you need for a change are:
+everything; run these before submitting a change:
 
 ```sh
 task validate   # gofmt + go vet across the module
 task lint       # golangci-lint + markdownlint, the same configs CI uses
 task test       # all Go tests
+task test:claude-sessions # Claude listing tests (Node.js 24 and npm)
 ```
 
 CI runs these on every pull request, so a clean local run is the same

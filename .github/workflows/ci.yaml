@@ -71,6 +71,11 @@ jobs:
       # validates every descriptor under examples/ plus the root-level
       # skills/ kit (see spec/examples_test.go).
       - run: task test:unit
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "24"
+          package-manager-cache: false
+      - run: task test:claude-sessions
 
   conformance:
     name: sandbox conformance suite

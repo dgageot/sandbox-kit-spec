@@ -109,7 +109,7 @@ capabilities:
       prompt: ["-p", "{{.Prompt}}"]
       continue: ["--continue"]
       resume: ["--resume", "{{.SessionID}}"]
-      list: ["claude", "agents", "--json", "--all"]
+      list: ["node", "/opt/claude-sessions/claude-sessions.mjs"]
 
   # Volumes persist across container recreation; deterministic naming
   # reattaches the same sandbox name to the same volumes on recreate, so
