@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"path"
 	"slices"
 	"strings"
@@ -348,6 +349,7 @@ func normalizePath(p string) string {
 // for comparison without modifying the inventories.
 func CheckCollisions(inventories []Inventory) error {
 	owner := map[string]string{}
+	var ownedPaths []string
 	collisions := map[string][]string{}
 	var problems []string
 	for _, inv := range inventories {
@@ -367,15 +369,32 @@ func CheckCollisions(inventories []Inventory) error {
 			if opaque {
 				target = path.Dir(marker)
 			}
-			for f, kit := range owner {
-				if kit == inv.Kit {
-					continue
-				}
-				// OCI root opacity hides all lower-layer children.
-				if (!opaque && f == target) || strings.HasPrefix(f, target+"/") || (opaque && target == ".") {
+			// Ownership only grows; refresh the index lazily for whiteouts.
+			if len(ownedPaths) != len(owner) {
+				ownedPaths = slices.Sorted(maps.Keys(owner))
+			}
+			report := func(f string) {
+				if kit := owner[f]; kit != inv.Kit {
 					problems = append(problems, fmt.Sprintf("/%s: %s removes a path contributed by %s (whiteout /%s)",
 						f, inv.Kit, kit, marker))
 				}
+			}
+			if !opaque {
+				if _, exists := owner[target]; exists {
+					report(target)
+				}
+			}
+			prefix := target + "/"
+			if opaque && target == "." {
+				// OCI root opacity hides all lower-layer children.
+				prefix = ""
+			}
+			start, _ := slices.BinarySearch(ownedPaths, prefix)
+			for _, f := range ownedPaths[start:] {
+				if !strings.HasPrefix(f, prefix) {
+					break
+				}
+				report(f)
 			}
 		}
 		for _, f := range inv.Files {

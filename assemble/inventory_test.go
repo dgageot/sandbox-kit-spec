@@ -2,6 +2,7 @@ package assemble
 
 import (
 	"bytes"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -219,6 +220,107 @@ func TestCheckCollisionsWhiteoutChecksHistoricalContributions(t *testing.T) {
 	})
 	require.ErrorContains(t, err, "/opt/tool")
 	require.ErrorContains(t, err, "mixin removes a path contributed by workload")
+}
+
+func TestCheckCollisionsWhiteoutIndex(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		marker string
+		want   string
+	}{
+		{
+			name:   "exact match and descendants skip intervening siblings",
+			marker: "opt/.wh.tool",
+			want: "kit file collisions:\n" +
+				"  /opt/tool/bin: cleanup removes a path contributed by base (whiteout /opt/.wh.tool)\n" +
+				"  /opt/tool/config: cleanup removes a path contributed by base (whiteout /opt/.wh.tool)\n" +
+				"  /opt/tool: cleanup removes a path contributed by base (whiteout /opt/.wh.tool)",
+		},
+		{
+			name:   "opaque directory excludes exact match and siblings",
+			marker: "opt/tool/.wh..wh..opq",
+			want: "kit file collisions:\n" +
+				"  /opt/tool/bin: cleanup removes a path contributed by base (whiteout /opt/tool/.wh..wh..opq)\n" +
+				"  /opt/tool/config: cleanup removes a path contributed by base (whiteout /opt/tool/.wh..wh..opq)",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := CheckCollisions([]Inventory{
+				{Kit: "base", Files: []string{"opt/tool/config", "opt/tool.bin", "opt/tool/bin", "opt/tool-other", "opt/tool", "opt/toolbox/bin"}},
+				{Kit: "cleanup", Files: []string{tc.marker}},
+			})
+			require.EqualError(t, err, tc.want)
+		})
+	}
+}
+
+func TestCheckCollisionsWhiteoutIndexTracksLaterKits(t *testing.T) {
+	err := CheckCollisions([]Inventory{
+		{Kit: "base", Files: []string{"z/last"}},
+		{Kit: "mixin", Files: []string{"absent/.wh.file", "a/first"}},
+		{Kit: "cleanup", Files: []string{".wh.a", ".wh.z"}},
+	})
+	require.EqualError(t, err, "kit file collisions:\n"+
+		"  /a/first: cleanup removes a path contributed by mixin (whiteout /.wh.a)\n"+
+		"  /z/last: cleanup removes a path contributed by base (whiteout /.wh.z)")
+}
+
+func TestCheckCollisionsWhiteoutIndexSkipsSameKit(t *testing.T) {
+	for _, marker := range []string{"opt/.wh.tool", "opt/tool/.wh..wh..opq", ".wh..wh..opq"} {
+		t.Run(marker, func(t *testing.T) {
+			err := CheckCollisions([]Inventory{
+				{Kit: "same", Files: []string{"opt/tool", "opt/tool/bin"}},
+				{Kit: "other", Files: []string{"opt/tool/config"}},
+				{Kit: "same", Files: []string{marker}},
+			})
+			require.EqualError(t, err, "kit file collisions:\n"+
+				"  /opt/tool/config: same removes a path contributed by other (whiteout /"+marker+")")
+		})
+	}
+}
+
+func TestCheckCollisionsReportsOverlappingWhiteouts(t *testing.T) {
+	err := CheckCollisions([]Inventory{
+		{Kit: "base", Files: []string{"opt/tool/bin"}},
+		{Kit: "mixin", Files: []string{"opt/.wh.tool", "opt/tool/.wh..wh..opq"}},
+	})
+	require.EqualError(t, err, "kit file collisions:\n"+
+		"  /opt/tool/bin: mixin removes a path contributed by base (whiteout /opt/.wh.tool)\n"+
+		"  /opt/tool/bin: mixin removes a path contributed by base (whiteout /opt/tool/.wh..wh..opq)")
+}
+
+func TestCheckCollisionsReportsFirstMalformedWhiteout(t *testing.T) {
+	err := CheckCollisions([]Inventory{
+		{Kit: "base", Files: []string{"opt/tool"}},
+		{Kit: "mixin", Files: []string{"opt/.wh.tool", "z/.wh.", "a/.wh."}},
+	})
+	require.EqualError(t, err, "kit mixin: whiteout /z/.wh. has no target")
+}
+
+func BenchmarkCheckCollisionsUnrelatedWhiteouts(b *testing.B) {
+	for _, size := range []struct{ files, whiteouts int }{
+		{10_000, 100},
+		{100_000, 100},
+		{100_000, 1_000},
+	} {
+		b.Run(fmt.Sprintf("files=%d/whiteouts=%d", size.files, size.whiteouts), func(b *testing.B) {
+			files := make([]string, size.files)
+			for i := range files {
+				files[i] = fmt.Sprintf("usr/lib/file%d", i)
+			}
+			whiteouts := make([]string, size.whiteouts)
+			for i := range whiteouts {
+				whiteouts[i] = fmt.Sprintf("opt/cleanup/.wh.file%d", i)
+			}
+			inventories := []Inventory{{Kit: "base", Files: files}, {Kit: "mixin", Files: whiteouts}}
+			b.ReportAllocs()
+			for b.Loop() {
+				if err := CheckCollisions(inventories); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
 }
 
 func TestCheckCollisionsRejectsEmptyWhiteoutTarget(t *testing.T) {
