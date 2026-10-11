@@ -26,8 +26,8 @@ provides: ["opencode@${{ kit.args.version }}"]
 dockerfile: ./opencode-mixin.dockerfile
 
 capabilities:
-  # Every domain a credential injects into, the OpenAI and Anthropic OAuth
-  # endpoints, the OpenAI resource host, and the non-credential domains
+  # Every domain a credential injects into, the OpenAI OAuth endpoint
+  # and resource host, and the non-credential domains
   # opencode needs (its site/config schema, npm for MCP/plugin installs,
   # GitHub release assets for LSP auto-install — the githubusercontent
   # zone via the documented single-label wildcard, since assets 302 to its
@@ -39,7 +39,6 @@ capabilities:
           - api.anthropic.com:443
           - claude.ai:443
           - console.anthropic.com:443
-          - platform.claude.com:443
           - api.business.githubcopilot.com:443
           - api.enterprise.githubcopilot.com:443
           - api.github.com:443
@@ -145,16 +144,9 @@ capabilities:
               access: "{{.AccessToken}}"
               refresh: "{{.RefreshToken}}"
               expires: "{{.ExpiresAt}}"
-  # Declared after openai on purpose: both OAuth entries render into the
-  # same auth.json, and sbx writes a credential file only when it is
-  # missing, in declaration order. With both subscriptions bound the
-  # ChatGPT entry keeps the file, so the codex auth plugin keeps working;
-  # the Claude entry lands only when ChatGPT OAuth is not bound. opencode
-  # has no built-in Claude Pro/Max login, so the anthropic oauth entry is
-  # read only by an auth plugin the user installs.
   - type: com.docker.sandbox/credential@1
     optional: true
-    description: Anthropic API access (API key or claude.ai OAuth)
+    description: Anthropic API access
     config:
       service: anthropic
       phase: runtime
@@ -165,22 +157,6 @@ capabilities:
           - {domain: api.anthropic.com, header: x-api-key, format: "%s"}
           - {domain: claude.ai, header: x-api-key, format: "%s"}
           - {domain: console.anthropic.com, header: x-api-key, format: "%s"}
-      oauth:
-        tokenEndpoint: {host: platform.claude.com, path: /v1/oauth/token}
-        # The auth plugin sends its OAuth bearer to api.anthropic.com; the
-        # inject rules above cover only the API-key presentation.
-        resourceHosts: [api.anthropic.com]
-        sentinels:
-          accessToken: sk-ant-oat01-proxy-managed
-          refreshToken: sk-ant-ort01-proxy-managed
-        credentialFile:
-          path: "~/.local/share/opencode/auth.json"
-          structure:
-            anthropic:
-              type: oauth
-              access: "{{.AccessToken}}"
-              refresh: "{{.RefreshToken}}"
-              expires: "{{.ExpiresAt}}"
   - type: com.docker.sandbox/credential@1
     optional: true
     description: OpenRouter API access
