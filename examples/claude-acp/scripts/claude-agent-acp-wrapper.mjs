@@ -2,12 +2,54 @@
 
 import { spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
+import { accessSync, constants, statSync } from "node:fs";
+import { homedir } from "node:os";
+import { delimiter, join } from "node:path";
 import { createInterface } from "node:readline";
 
 const adapter =
   "/opt/claude-agent-acp/lib/node_modules/@agentclientprotocol/claude-agent-acp/dist/index.js";
+
+function isExecutable(path) {
+  try {
+    accessSync(path, constants.X_OK);
+    return statSync(path).isFile();
+  } catch {
+    return false;
+  }
+}
+
+// The claude this composition installed, wherever its kit put it:
+// claude-mixin installs /usr/local/bin/claude, the claude workload kit
+// $HOME/.local/bin/claude. An explicit CLAUDE_CODE_EXECUTABLE wins when
+// it exists; otherwise PATH order, so the adapter drives the same binary
+// an interactive `claude` runs. The SDK's vendored binary is omitted at
+// build time, so without this the adapter would find no agent at all.
+function resolveClaude() {
+  const fromPath = (process.env.PATH ?? "")
+    .split(delimiter)
+    .filter(Boolean)
+    .map((dir) => join(dir, "claude"));
+  const candidates = [
+    process.env.CLAUDE_CODE_EXECUTABLE,
+    ...fromPath,
+    "/usr/local/bin/claude",
+    join(homedir(), ".local/bin/claude"),
+  ].filter(Boolean);
+  return { found: candidates.find(isExecutable), candidates };
+}
+
+const claude = resolveClaude();
+if (!claude.found) {
+  console.error(
+    `claude-agent-acp: no claude binary found; looked for ${[...new Set(claude.candidates)].join(", ")}`,
+  );
+  process.exit(127);
+}
+const env = { ...process.env, CLAUDE_CODE_EXECUTABLE: claude.found };
+
 const child = spawn(process.execPath, [adapter, ...process.argv.slice(2)], {
-  env: process.env,
+  env,
   stdio: ["pipe", "pipe", "inherit"],
 });
 
@@ -24,11 +66,9 @@ for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
 }
 
 function cliIsAuthenticated() {
-  const executable =
-    process.env.CLAUDE_CODE_EXECUTABLE || "/usr/local/bin/claude";
-  const probe = spawnSync(executable, ["auth", "status", "--json"], {
+  const probe = spawnSync(claude.found, ["auth", "status", "--json"], {
     encoding: "utf8",
-    env: process.env,
+    env,
     timeout: 5_000,
   });
 

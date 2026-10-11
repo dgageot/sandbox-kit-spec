@@ -11,7 +11,7 @@ description: >-
   the Cursor credential (API key or OAuth), scoped egress, and the
   workspace pre-trust and config seeds the agent needs.
 sourceUrl: https://cursor.com
-version: "0.1.0"
+version: "2026.10.1"  # the cursor-agent build cursor.dockerfile pins and asserts
 
 kind: workload
 
@@ -133,6 +133,19 @@ capabilities:
       continue: ["--continue"]
       resume: ["--resume", "{{.SessionID}}"]
       sessionPicker: ["--resume"]
+
+  # cursor-agent speaks ACP itself (the hidden `acp` subcommand), taking
+  # the global options placed before it. --force, not the entrypoint's
+  # --yolo: the TUI treats the two as one, but the ACP server reads only
+  # force when deciding to auto-run tools. It keeps running after stdin
+  # closes and stops on SIGTERM, so acp-graceful (see the dockerfile)
+  # follows a stdin close with SIGTERM.
+  - type: com.docker.sandbox/acp@1
+    optional: true
+    description: Drive cursor sessions over the Agent Client Protocol
+    config:
+      agent: cursor
+      command: [acp-graceful, cursor-agent, --force, acp]
 
   # Where cursor reads shared skills, so the host's store reaches it.
   # The runtime also exposes selected agent-skill@1 bundles here, even

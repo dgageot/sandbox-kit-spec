@@ -24,7 +24,7 @@ kind: mixin
 
 args:
   version:
-    default: "0.86.0"
+    default: "0.89.1"
     pattern: '^[0-9]+\.[0-9]+\.[0-9]+$'
     description: claude-agent-acp release to install
     buildArg: ACP_VERSION
@@ -34,8 +34,8 @@ provides: ["claude-acp@${{ kit.args.version }}"]
 # The adapter execs the sandboxed claude binary, so a composition without
 # claude yields an adapter with no agent behind it. Requiring the
 # capability rather than naming the kit keeps any claude-carrying kit
-# eligible, and it is also what makes CLAUDE_CODE_EXECUTABLE resolvable:
-# the claude-mixin kit installs /usr/local/bin/claude.
+# eligible: the wrapper finds that kit's claude wherever it installed it
+# (/usr/local/bin for claude-mixin, $HOME/.local/bin for the workload).
 requires: ["claude"]
 
 # No network policy and no credential: the adapter opens no sockets of

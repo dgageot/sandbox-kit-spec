@@ -23,7 +23,7 @@ The Kit declares an optional `acp@1` endpoint, so supporting hosts can
 find the adapter without hard-coding its command. It starts in
 `agent-full-access` mode to match the interactive Codex entrypoint.
 
-Pinned `codex-acp` 2.1.1 handles stdin closure but has no `SIGTERM`
+Pinned `codex-acp` 2.2.2 handles stdin closure but has no `SIGTERM`
 cleanup handler. Cancellation and session flushing on `SIGTERM` have
 not been verified against `acp@1`'s shutdown guarantee. Hosts should
 close the ACP stdin stream and allow the adapter to finish before

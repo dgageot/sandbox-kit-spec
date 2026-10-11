@@ -32,12 +32,13 @@ capabilities:
   # the image config declares instead of assuming one.
   - type: com.docker.sandbox/sbx@1
 
-  # Every domain a credential injects into, the OpenAI OAuth endpoint and
-  # its resource host, and the non-credential domains opencode needs (its
-  # site/config schema, npm for MCP/plugin installs, GitHub release assets
-  # for LSP auto-install — the githubusercontent zone via the documented
-  # single-label wildcard, since assets 302 to its subdomains), and the template's apt
-  # mirrors (a workload owns its base).
+  # Every domain a credential injects into, the OpenAI OAuth endpoint
+  # and resource host, and the non-credential domains
+  # opencode needs (its site/config schema, npm for MCP/plugin installs,
+  # GitHub release assets for LSP auto-install — the githubusercontent
+  # zone via the documented single-label wildcard, since assets 302 to its
+  # subdomains), and the template's apt mirrors (a workload owns its
+  # base).
   - type: com.docker.sandbox/network-policy@1
     config:
       runtime:
@@ -76,19 +77,6 @@ capabilities:
   # Multi-provider credentials, each optional and proxy-managed where a
   # well-known env var exists. The github credential mirrors the copilot
   # kit: one auth format per service, Bearer throughout.
-  - type: com.docker.sandbox/credential@1
-    optional: true
-    description: Anthropic API access
-    config:
-      service: anthropic
-      phase: runtime
-      apiKey:
-        name: ANTHROPIC_API_KEY
-        proxyManaged: true
-        inject:
-          - {domain: api.anthropic.com, header: x-api-key, format: "%s"}
-          - {domain: claude.ai, header: x-api-key, format: "%s"}
-          - {domain: console.anthropic.com, header: x-api-key, format: "%s"}
   - type: com.docker.sandbox/credential@1
     optional: true
     description: GitHub and Copilot access
@@ -169,6 +157,19 @@ capabilities:
               expires: "{{.ExpiresAt}}"
   - type: com.docker.sandbox/credential@1
     optional: true
+    description: Anthropic API access
+    config:
+      service: anthropic
+      phase: runtime
+      apiKey:
+        name: ANTHROPIC_API_KEY
+        proxyManaged: true
+        inject:
+          - {domain: api.anthropic.com, header: x-api-key, format: "%s"}
+          - {domain: claude.ai, header: x-api-key, format: "%s"}
+          - {domain: console.anthropic.com, header: x-api-key, format: "%s"}
+  - type: com.docker.sandbox/credential@1
+    optional: true
     description: OpenRouter API access
     config:
       service: openrouter
@@ -191,6 +192,15 @@ capabilities:
           - {domain: api.x.ai, header: Authorization, format: "Bearer %s"}
   - type: com.docker.sandbox/lifecycle@1
     config:
+      install:
+        # The skills mount lands at ~/.config/opencode/skills, and the
+        # runtime creates the missing parents for it as root. opencode.json
+        # lives beside the mount, so hand both parents back to the agent
+        # before the startup merge below tries to write there. Not -R: the
+        # skills mount itself is read-only.
+        - command: mkdir -p /home/agent/.config/opencode && chown agent:agent /home/agent/.config /home/agent/.config/opencode
+          user: "0"
+          description: Ensure ~/.config/opencode is owned by agent
       startup:
         # Gateway-first MCP registration, merged with jq rather than
         # overwritten: startup runs on every boot, and opencode.json is
@@ -232,6 +242,18 @@ capabilities:
       prompt: ["--prompt={{.Prompt}}"]
       continue: ["--continue"]
       resume: ["--session", "{{.SessionID}}"]
+
+  # opencode speaks ACP itself, so the adapter is the agent binary. It
+  # reads the same opencode.json the TUI does and starts sessions in the
+  # same `build` mode, with `plan` offered as the stricter session mode.
+  # session/new returns the native ses_… id that `--session` resumes, and
+  # stdin EOF and SIGTERM each end the process well inside five seconds.
+  - type: com.docker.sandbox/acp@1
+    optional: true
+    description: Drive opencode sessions over the Agent Client Protocol
+    config:
+      agent: opencode
+      command: [opencode, acp]
 
   # Where opencode reads shared skills, so the host's store reaches it.
   # The runtime also exposes selected agent-skill@1 bundles here, even

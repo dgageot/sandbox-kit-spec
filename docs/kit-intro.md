@@ -204,7 +204,8 @@ or, for a set, a list of kits. How you connect them is your choice:
 2. **Inline `build:` block** — the Dockerfile text embedded in the
    descriptor, so a Kit is a single file.
 3. **Comment descriptor** — a Dockerfile carrying its declarations in a
-   `# kit:` comment block, so the file is both.
+   `# kit:` comment block, so the file is both. `examples/gh-comment` is
+   the `gh` Kit written this way.
 4. **Kit set** — `kits:`, above.
 
 All of them produce ordinary Kit images. A BuildKit frontend, dispatched by

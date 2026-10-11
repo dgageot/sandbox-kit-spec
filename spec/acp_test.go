@@ -208,8 +208,8 @@ func TestACPSurface(t *testing.T) {
 }
 
 func TestACPExamples(t *testing.T) {
-	for _, agent := range []string{"claude", "codex"} {
-		raw, err := os.ReadFile("../examples/" + agent + "-acp/" + agent + "-acp.yaml")
+	for agent, kit := range map[string]string{"claude": "claude-acp", "codex": "codex-acp", "opencode": "opencode", "gemini": "gemini", "cursor": "cursor"} {
+		raw, err := os.ReadFile("../examples/" + kit + "/" + kit + ".yaml")
 		require.NoError(t, err)
 		d, err := Decode(raw)
 		require.NoError(t, err)
@@ -221,13 +221,25 @@ func TestACPExamples(t *testing.T) {
 			require.Equal(t, CommandLine{"codex-acp"}, endpoints[0].Command)
 			require.Equal(t, "agent-full-access", endpoints[0].Env["INITIAL_AGENT_MODE"])
 		}
+		switch agent {
+		case "opencode":
+			require.Equal(t, CommandLine{"opencode", "acp"}, endpoints[0].Command)
+		case "gemini":
+			require.Equal(t, CommandLine{"acp-graceful", "gemini", "--acp", "--yolo"}, endpoints[0].Command)
+		case "cursor":
+			// --force, not --yolo: cursor's ACP server reads only force.
+			require.Equal(t, CommandLine{"acp-graceful", "cursor-agent", "--force", "acp"}, endpoints[0].Command)
+		}
 		require.Equal(t, 1, ACPProtocolVersion(endpoints[0].ACP))
+		var others []string
 		for _, c := range d.Capabilities {
 			if c.Type == CapabilityACP {
 				require.True(t, c.Optional)
+			} else {
+				others = append(others, c.Type)
 			}
 		}
-		selected, err := SelectCapabilities(t.Context(), d, Supported(CapabilityAgentContext))
+		selected, err := SelectCapabilities(t.Context(), d, Supported(others...))
 		require.NoError(t, err, "a host without ACP keeps the kit usable")
 		require.False(t, HasCapability(selected.Capabilities, CapabilityACP))
 	}

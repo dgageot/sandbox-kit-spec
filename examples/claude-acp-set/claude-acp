@@ -10,7 +10,7 @@ set -euo pipefail
 
 # Set this in the environment passed to this script, using a kit set
 # image you have built and pushed to your registry:
-#   SBX_ACP_BASE=docker.io/example/sbx-kit-claude-acp-set:1.0.0
+#   SBX_ACP_BASE=docker.io/example/sbx-kit-claude-acp-set:1.0.2
 : "${SBX_ACP_BASE:?Set SBX_ACP_BASE to your Claude ACP kit set image reference}"
 
 project="${1:-$PWD}"
