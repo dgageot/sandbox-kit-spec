@@ -429,7 +429,8 @@ func volumeRecreateConflicts(ctx context.Context, e *Env) []report.Finding {
 					return f
 				}
 			}
-			if err := e.Adapter.Recreate(ctx, id); err != nil {
+			initialKits := []string{e.Fixtures(fixtureWorkload), e.Fixtures(transition.initialFixture)}
+			if err := e.Adapter.RecreateWith(ctx, id, initialKits, transition.initialArgs); err != nil {
 				return []report.Finding{report.Failf("refusal altered retained inputs: %v", err)}
 			}
 			if f := volumeProbe(ctx, e, id, "mounted", volumePath, "", "", ""); len(f) > 0 {
@@ -518,7 +519,7 @@ func volumeDormantRecreateConflict(ctx context.Context, e *Env, transition volum
 	if f := volumeProbe(ctx, e, id, "unmounted", volumePath, "", "", ""); len(f) > 0 {
 		return f
 	}
-	if err := e.Adapter.RecreateWith(ctx, id, []string{e.Fixtures(fixtureWorkload), e.Fixtures(transition.initialFixture)}, nil); err != nil {
+	if err := e.Adapter.RecreateWith(ctx, id, []string{e.Fixtures(fixtureWorkload), e.Fixtures(transition.initialFixture)}, transition.initialArgs); err != nil {
 		return []report.Finding{report.Failf("compatible dormant reattachment: %v", err)}
 	}
 	if f := volumeProbe(ctx, e, id, "mounted", volumePath, "", "", ""); len(f) > 0 {

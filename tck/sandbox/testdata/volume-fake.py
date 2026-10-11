@@ -266,6 +266,17 @@ def apply(record, kits, overrides, recreating=False):
         if broken == 'volume-forgets-dormant-config' and path not in record['selected']:
             previous = None
         if previous and not equivalent(previous, config):
+            dormant = path not in record['selected']
+            for field in ['size', 'mode']:
+                scope = 'dormant' if dormant else 'selected'
+                if (broken == 'volume-refusal-corrupts-' + scope + '-' + field
+                        and previous[field] != config[field]):
+                    # Persist the candidate request but leave container and
+                    # data untouched. Replaying retained args masks this bug.
+                    record['args'] = overrides
+                    record['allocated'][path] = config
+                    save(sandbox, record)
+                    refuse('candidate metadata saved before refusal')
             if broken == 'volume-refusal-destroys-container':
                 shutil.rmtree(storage / record['storage'] / 'writable', ignore_errors=True)
             if broken == 'volume-refusal-destroys-storage':
