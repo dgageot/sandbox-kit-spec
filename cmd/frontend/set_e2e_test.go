@@ -248,7 +248,9 @@ capabilities:
   - type: com.docker.sandbox/volume@1
     config: {path: /cache, size: "${{ kit.args.size }}", mode: "${{ kit.args.mode }}"}
   - <<: {type: com.docker.sandbox/volume@1}
-    config: {path: /literal-cache, size: "${{ kit.args.literal_size }}", mode: "${{ kit.args.literal_mode }}"}
+    config:
+      <<: {size: "${{ kit.args.literal_size }}", mode: "${{ kit.args.literal_mode }}"}
+      path: /literal-cache
 `, nil)
 	}
 	ref := registry + "/sbx-kit-volume-set:1.0.0"

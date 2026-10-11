@@ -175,15 +175,20 @@ func ExpandBuildArgs(raw []byte, decls map[string]Arg, values map[string]string)
 		}
 		if original, ok := originals[n.Alias]; n.Kind == yaml.AliasNode && ok {
 			// Only detach an alias when its use needs different scalar typing.
-			original.Anchor = ""
+			original = *cloneExpansionNode(&original)
 			original.HeadComment, original.LineComment, original.FootComment = n.HeadComment, n.LineComment, n.FootComment
 			expand(&original, forceText, volumeConfig)
-			if original.Tag != n.Alias.Tag || original.Value != n.Alias.Value {
+			if !sameExpansionValue(&original, n.Alias) {
 				*n = original
 			} else {
 				n.HeadComment, n.LineComment, n.FootComment = original.HeadComment, original.LineComment, original.FootComment
 			}
 			return
+		}
+		if n.Anchor != "" {
+			// A merged mapping can be shared by differently typed configs.
+			// Retain its references before the first use expands them.
+			originals[n] = *cloneExpansionNode(n)
 		}
 		n.HeadComment = expandString(n.HeadComment, decls, values, "build", &expandErr)
 		n.LineComment = expandString(n.LineComment, decls, values, "build", &expandErr)
@@ -195,9 +200,6 @@ func ExpandBuildArgs(raw []byte, decls map[string]Arg, values map[string]string)
 				return
 			}
 			if text, ok := decoded.(string); ok && ContainsArgRef(text) {
-				if n.Anchor != "" {
-					originals[n] = *n
-				}
 				var value any
 				if forceText {
 					value = expandString(text, decls, values, "build", &expandErr)
@@ -253,6 +255,9 @@ func ExpandBuildArgs(raw []byte, decls map[string]Arg, values map[string]string)
 			}
 			text := isKey || (volumeConfig && volumeTextField(field))
 			config := field == "config" && capabilityType == CapabilityVolume
+			if volumeConfig && (n.Kind == yaml.SequenceNode || (!isKey && n.Content[i-1].Tag == "!!merge")) {
+				config = true
+			}
 			expand(child, text, config)
 			if expandErr != nil {
 				return
@@ -277,6 +282,34 @@ func ExpandBuildArgs(raw []byte, decls map[string]Arg, values map[string]string)
 		return nil, expandErr
 	}
 	return yaml.Marshal(&doc)
+}
+
+func cloneExpansionNode(n *yaml.Node) *yaml.Node {
+	out := *n
+	out.Anchor = ""
+	out.Content = make([]*yaml.Node, len(n.Content))
+	for i, child := range n.Content {
+		out.Content[i] = cloneExpansionNode(child)
+	}
+	return &out
+}
+
+func sameExpansionValue(a, b *yaml.Node) bool {
+	if a.Kind == yaml.AliasNode {
+		a = a.Alias
+	}
+	if b.Kind == yaml.AliasNode {
+		b = b.Alias
+	}
+	if a.Kind != b.Kind || a.Tag != b.Tag || a.Value != b.Value || len(a.Content) != len(b.Content) {
+		return false
+	}
+	for i, child := range a.Content {
+		if !sameExpansionValue(child, b.Content[i]) {
+			return false
+		}
+	}
+	return true
 }
 
 // ExpandCreateArgs expands references to create-phase args (those NOT

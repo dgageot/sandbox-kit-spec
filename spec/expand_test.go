@@ -443,3 +443,59 @@ capabilities:
 		})
 	}
 }
+
+func TestExpandBuildArgsKeepsMergedVolumeTextFields(t *testing.T) {
+	fields := `{size: "${{ kit.args.size }}", mode: "${{ kit.args.mode }}", tmpfs: "${{ kit.args.ram }}"}`
+	for _, tc := range []struct {
+		name, config, prefix string
+	}{
+		{"inline", "<<: " + fields, ""},
+		{"nested", "<<: {<<: " + fields + "}", ""},
+		{"sequence", "<<: [" + fields + `, {size: "2k", mode: "0700"}]`, ""},
+		{"sequence precedence", `<<: [{size: "1024", mode: "755"}, ` + fields + `]`, ""},
+		{"alias", "<<: *source", "  - type: com.docker.sandbox/volume@1\n    config: &source\n      path: /source\n      <<: " + fields + "\n"},
+		{"aliased sequence", "<<: [*source, {size: \"2k\"}]", "  - type: com.docker.sandbox/volume@1\n    config: &source\n      path: /source\n      <<: " + fields + "\n"},
+		{"alias from numeric config", "<<: *source", "  - type: com.example/settings@1\n    config: &source " + fields + "\n"},
+		{"aliased sequence from numeric config", "<<: [*source, {size: \"2k\"}]", "  - type: com.example/settings@1\n    config: &source " + fields + "\n"},
+		{"direct override", "<<: " + fields + "\nsize: \"1024\"\nmode: \"755\"", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			raw := []byte(`schemaVersion: "3"
+kind: mixin
+args:
+  size: {buildArg: SIZE, required: true}
+  mode: {buildArg: MODE, required: true}
+  ram: {buildArg: RAM, required: true}
+capabilities:
+` + tc.prefix + `  - <<: {type: com.docker.sandbox/volume@1}
+    config:
+      path: /cache
+      ` + strings.ReplaceAll(tc.config, "\n", "\n      ") + `
+  - type: com.docker.sandbox/port@1
+    config:
+      <<: {container: "${{ kit.args.size }}"}
+`)
+			d, err := Decode(raw)
+			require.NoError(t, err)
+			_, err = ValidateRaw(raw, d)
+			require.NoError(t, err)
+			out, err := ExpandBuildArgs(raw, d.Args, map[string]string{"size": "1024", "mode": "755", "ram": "true"})
+			require.NoError(t, err)
+			require.Contains(t, string(out), "<<:", "expansion preserves the authored merge")
+			published, err := Decode(out)
+			require.NoError(t, err)
+			_, err = ValidatePublished(out, published)
+			require.NoError(t, err)
+			count := len(published.Capabilities)
+			volumes, err := VolumesOf(published.Capabilities[count-2 : count-1])
+			require.NoError(t, err)
+			require.Equal(t, []Volume{{Path: "/cache", Size: "1024", Mode: "755", Tmpfs: true}}, volumes)
+			ports, err := PortsOf(published.Capabilities[count-1:])
+			require.NoError(t, err)
+			require.Equal(t, 1024, ports[0].Container, "merged numeric fields still adopt numeric values")
+			if strings.Contains(tc.prefix, "com.example/settings@1") {
+				require.Equal(t, 1024, published.Capabilities[0].Config["size"], "the shared source retains its numeric typing")
+			}
+		})
+	}
+}
