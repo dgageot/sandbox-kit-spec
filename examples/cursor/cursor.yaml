@@ -11,7 +11,7 @@ description: >-
   the Cursor credential (API key or OAuth), scoped egress, and the
   workspace pre-trust and config seeds the agent needs.
 sourceUrl: https://cursor.com
-version: "0.1.0"
+version: "2026.10.1"
 
 kind: workload
 
