@@ -20,6 +20,15 @@ RUN npm install -g --prefix /opt/codex-acp \
 RUN find /opt/codex-acp -type d -path "*/@openai/codex-*/vendor" -prune -exec rm -rf {} + \
  && ! find /opt/codex-acp -type f -name codex | grep -q .
 
+# A subagent Codex reuses ("interacted") stays marked finished in the
+# adapter, which then drops all of its work; the script reopens it, as
+# the adapter already does for the older collaboration calls. It leaves
+# a release that has the fix alone and fails the build on one whose code
+# moved. See the script for the details.
+COPY scripts/patch-reused-subagents.mjs /tmp/patch-reused-subagents.mjs
+RUN node /tmp/patch-reused-subagents.mjs \
+      /opt/codex-acp/lib/node_modules/@agentclientprotocol/codex-acp/dist/index.js
+
 FROM dhi.io/debian-base:trixie-dev
 COPY --from=build /usr/bin/node /usr/local/bin/node
 COPY --from=build /opt/codex-acp /opt/codex-acp
