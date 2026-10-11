@@ -178,6 +178,9 @@ capabilities:
           - {domain: console.anthropic.com, header: x-api-key, format: "%s"}
       oauth:
         tokenEndpoint: {host: platform.claude.com, path: /v1/oauth/token}
+        # The auth plugin sends its OAuth bearer to api.anthropic.com; the
+        # inject rules above cover only the API-key presentation.
+        resourceHosts: [api.anthropic.com]
         sentinels:
           accessToken: sk-ant-oat01-proxy-managed
           refreshToken: sk-ant-ort01-proxy-managed
