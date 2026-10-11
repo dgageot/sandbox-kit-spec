@@ -29,7 +29,9 @@ jobs:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       # Before QEMU setup: it pulls its binfmt image from Docker Hub, and
-      # anonymously that pull has hit the rate limit.
+      # anonymously that pull has been refused with toomanyrequests. A
+      # cached image covered it then; on a cache miss the setup has
+      # nothing to fall back to.
       - name: Login to Docker Hub
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         env:
