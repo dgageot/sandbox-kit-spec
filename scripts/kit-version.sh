@@ -8,9 +8,10 @@
 # knows where upstream publishes it, so the check report and the build
 # cannot disagree about what "latest" means.
 #
-# gh is deliberately absent: its version authority is the nixpkgs pin in
-# examples/gh/gh.dockerfile, so a bump is editing that pin (and the
-# provides entry the pinned package dictates).
+# gh and gh-comment are deliberately absent: their version authority is
+# the nixpkgs pin in examples/gh/gh.dockerfile and
+# examples/gh-comment/gh-comment.dockerfile, so a bump is editing that pin
+# in both (and the provides entry the pinned package dictates).
 set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."

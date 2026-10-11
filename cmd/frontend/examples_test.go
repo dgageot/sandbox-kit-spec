@@ -13,14 +13,15 @@ import (
 // Comment-descriptor examples get the same drift guard the YAML examples
 // have in spec/examples_test.go: every example dockerfile carrying a
 // `# kit:` block must extract, decode, and validate against the current
-// grammar. The examples need not exercise the form at all — extraction
-// itself is covered by comment_descriptor_test.go against fixtures — so
-// this asserts only that the scan happened, not that it found anything.
+// grammar. At least one example must carry the form: with none, this test
+// passes having judged nothing, and the form stops being exercised by
+// kits:dev either.
 func TestExampleCommentDescriptorsValidate(t *testing.T) {
 	matches, err := filepath.Glob(filepath.Join("..", "..", "examples", "*", "*.dockerfile"))
 	require.NoError(t, err)
 	require.NotEmpty(t, matches, "no example dockerfiles scanned")
 
+	found := 0
 	for _, path := range matches {
 		raw, err := os.ReadFile(path)
 		require.NoError(t, err)
@@ -28,6 +29,7 @@ func TestExampleCommentDescriptorsValidate(t *testing.T) {
 		if !ok {
 			continue // a companion dockerfile, validated through its kit.yaml
 		}
+		found++
 		t.Run(filepath.Base(filepath.Dir(path)), func(t *testing.T) {
 			d, err := spec.Decode(yamlBytes)
 			require.NoError(t, err)
@@ -35,4 +37,5 @@ func TestExampleCommentDescriptorsValidate(t *testing.T) {
 			require.NoError(t, err)
 		})
 	}
+	require.NotZero(t, found, "no example carries a %s comment descriptor", kitCommentMarker)
 }

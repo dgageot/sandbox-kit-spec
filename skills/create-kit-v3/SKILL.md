@@ -65,7 +65,8 @@ The default authoring form is a companion pair, found by filename stem:
 
 No `dockerfile:` field is needed — the stem convention finds it. Three other
 forms exist (an inline `build:` block, a `# kit:` comment descriptor inside a
-Dockerfile, and a `kind: set` list of other kits); see SPEC-v3 §3.
+Dockerfile, and a `kind: set` list of other kits); see SPEC-v3 §3, and
+`examples/gh-comment` for the comment descriptor.
 
 ## Descriptor skeleton
 
