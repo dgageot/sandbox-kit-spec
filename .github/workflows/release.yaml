@@ -7,7 +7,7 @@ on:
       - "v3.*"
 
 # Publishes kit-tck via GoReleaser and the BuildKit frontend image to Hub.
-# Two Hub credentials, for two jobs. Pulls before the push use the org's
+# Two Hub credentials, for two purposes. Pulls before the push use the org's
 # read-only public bot: org variable DOCKERPUBLICBOT_USERNAME and org
 # secret DOCKERPUBLICBOT_READ_PAT, which grant no write. The push uses
 # Docker OIDC, with no long-lived PAT: set repo variables
