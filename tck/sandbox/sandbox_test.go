@@ -199,6 +199,21 @@ func TestBackingAgentCloseWithIdleClient(t *testing.T) {
 // requirement — the two network-policy versions state the same duty about
 // the host lists — and dropping it has to fail every one of them.
 var mutations = map[string][]string{
+	"volume-omits-recomposed-mount":                            {"volume@1/composition-independent"},
+	"volume-root-not-writable+volume-omits-recomposed-mount":   {"volume@1/composition-independent"},
+	"volume-root-not-readable+volume-omits-recomposed-mount":   {"volume@1/composition-independent"},
+	"volume-refuses-recomposition":                             {"volume@1/composition-independent"},
+	"volume-root-not-writable+volume-refuses-recomposition":    {"volume@1/composition-independent"},
+	"volume-root-not-readable+volume-refuses-recomposition":    {"volume@1/composition-independent"},
+	"volume-root-not-writable+volume-ignores-replacement-kits": {"volume@1/composition-independent"},
+	"volume-root-not-readable+volume-ignores-replacement-kits": {"volume@1/composition-independent"},
+	"volume-root-not-writable+volume-ignores-published-kit":    {"volume@1/composition-independent"},
+	"volume-root-not-readable+volume-ignores-published-kit":    {"volume@1/composition-independent"},
+	"volume-root-not-writable+volume-keeps-writable-layer":     {"volume@1/composition-independent"},
+	"volume-root-not-readable+volume-keeps-writable-layer":     {"volume@1/composition-independent"},
+	"volume-root-not-writable+volume-raw-paths":                {"volume@1/composition-independent"},
+	"volume-root-not-readable+volume-raw-paths":                {"volume@1/composition-independent"},
+
 	"volume-root-not-writable+volume-ignores-recreate-config": {"volume@1/recreate-config-compatible"},
 	"volume-root-not-readable+volume-forgets-dormant-config":  {"volume@1/recreate-config-compatible"},
 

@@ -278,6 +278,8 @@ def apply(record, kits, overrides, recreating=False):
                     and not permits_directional_change(previous, config, path not in record['selected'])):
                 refuse('retained volume configuration changed at ' + path)
     if recreating:
+        if broken == 'volume-refuses-recomposition' and record['kits'] != kits:
+            refuse('equivalent changed-composition recreation rejected')
         if broken != 'volume-keeps-writable-layer':
             shutil.rmtree(storage / record['storage'] / 'writable', ignore_errors=True)
         if broken == 'volume-keys-on-kit' and record['kits'] != kits:
@@ -315,6 +317,8 @@ def apply(record, kits, overrides, recreating=False):
         del record['allocated'][renamed]
     for path in [primary, secondary, primary + '-control']:
         destination(record, path, True).mkdir(parents=True, exist_ok=True)
+    if recreating and broken == 'volume-omits-recomposed-mount':
+        record['selected'].pop(primary, None)
     run_hooks(record, 'recreate' if recreating else 'create')
     if (broken == 'volume-copies-image-before-hooks'
             or (recreating and broken == 'volume-copies-image-before-recreate-hooks')):

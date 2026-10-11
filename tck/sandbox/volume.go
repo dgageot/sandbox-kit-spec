@@ -156,47 +156,68 @@ func volumeRecompose(ctx context.Context, e *Env) []report.Finding {
 		return []report.Finding{report.Failf("create: %v", err)}
 	}
 	defer remove()
+	var findings []report.Finding
+	seeded := map[string]bool{}
 	for _, path := range []string{volumePath, volumeOtherPath} {
-		if f := volumeSeed(ctx, e, id, path, "marker", "retained"); len(f) > 0 {
-			return f
+		f := volumeSeed(ctx, e, id, path, "marker", "retained")
+		if len(f) > 0 && f[0].Severity != report.Skip {
+			return append(findings, f...)
 		}
-	}
-	if f := volumeProbe(ctx, e, id, "write", volumeControlPath, "marker", "retained", ""); len(f) > 0 {
-		return f
+		findings = append(findings, f...)
+		seeded[path] = len(f) == 0
 	}
 	// A file created by the agent can be chmodded even when the runtime
 	// owns the mount root. Root ownership and initial mode are SHOULDs.
-	if f := volumeProbe(ctx, e, id, "set-mode", volumePath, "marker", "0600", ""); len(f) > 0 {
-		return f
-	}
-	if err := e.Adapter.RecreateWith(ctx, id, []string{e.Fixtures("volume-workload"), e.Fixtures("volume-state-other")}, nil); err != nil {
-		return []report.Finding{report.Failf("replace workload and declaring Kit: %v", err)}
-	}
-	if f := volumeCompositionMarker(ctx, e, id, "/var/tmp/kit-tck-volume-workload", "replacement\n"); len(f) > 0 {
-		return f
-	}
-	for _, path := range []string{volumePath, volumeOtherPath} {
-		if f := volumeProbe(ctx, e, id, "read", path, "marker", "", "retained"); len(f) > 0 {
-			return f
+	if seeded[volumePath] {
+		if f := volumeProbe(ctx, e, id, "set-mode", volumePath, "marker", "0600", ""); len(f) > 0 {
+			return append(findings, f...)
 		}
 	}
-	if f := volumeProbe(ctx, e, id, "absent", volumeControlPath, "marker", "", ""); len(f) > 0 {
-		return f
-	}
-	// The publisher pin proves these are the flattened declarations of
-	// matching requests, consumed under another Kit identity.
-	if err := e.Adapter.RecreateWith(ctx, id, []string{e.Fixtures("volume-workload"), e.Fixtures("volume-state-published")}, nil); err != nil {
-		return []report.Finding{report.Failf("replace loose mixins with published declarations: %v", err)}
-	}
-	if f := volumeCompositionMarker(ctx, e, id, "/usr/share/kit-tck-volume-published", "published\n"); len(f) > 0 {
-		return f
-	}
-	for _, path := range []string{volumePath, volumeOtherPath} {
-		if f := volumeProbe(ctx, e, id, "read", path, "marker", "", "retained"); len(f) > 0 {
-			return f
+	for _, replacement := range []struct {
+		name         string
+		kits         []string
+		marker, want string
+	}{
+		{"replace workload and declaring Kit", []string{e.Fixtures("volume-workload"), e.Fixtures("volume-state-other")}, "/var/tmp/kit-tck-volume-workload", "replacement\n"},
+		// The publisher pin proves these are the flattened declarations
+		// of matching requests, consumed under another Kit identity.
+		{"replace loose mixins with published declarations", []string{e.Fixtures("volume-workload"), e.Fixtures("volume-state-published")}, "/usr/share/kit-tck-volume-published", "published\n"},
+	} {
+		// Initial volume access only gates its contents observations.
+		// Each recreation must still replace the composition and layer.
+		if f := volumeProbe(ctx, e, id, "write", volumeControlPath, "marker", "retained", ""); len(f) > 0 {
+			return append(findings, f...)
+		}
+		if err := e.Adapter.RecreateWith(ctx, id, replacement.kits, nil); err != nil {
+			return append(findings, report.Failf("%s: %v", replacement.name, err))
+		}
+		if f := volumeCompositionMarker(ctx, e, id, replacement.marker, replacement.want); len(f) > 0 {
+			return append(findings, f...)
+		}
+		paths, err := e.Adapter.VolumePaths(ctx, id)
+		if err != nil || !slices.Equal(sorted(paths), []string{volumePath, volumeOtherPath}) {
+			return append(findings, report.Failf("%s retained destinations: %v (%v)", replacement.name, paths, err))
+		}
+		for _, path := range []string{volumePath, volumeOtherPath} {
+			if f := volumeProbe(ctx, e, id, "mounted", path, "", "", ""); len(f) > 0 {
+				return append(findings, f...)
+			}
+			if seeded[path] {
+				if f := volumeProbe(ctx, e, id, "read", path, "marker", "", "retained"); len(f) > 0 {
+					return append(findings, f...)
+				}
+			}
+		}
+		if f := volumeProbe(ctx, e, id, "absent", volumeControlPath, "marker", "", ""); len(f) > 0 {
+			return append(findings, f...)
+		}
+		if seeded[volumePath] {
+			if f := volumeProbe(ctx, e, id, "mode", volumePath, "marker", "", "600\n"); len(f) > 0 {
+				return append(findings, f...)
+			}
 		}
 	}
-	return volumeProbe(ctx, e, id, "mode", volumePath, "marker", "", "600\n")
+	return findings
 }
 
 func volumeCompositionMarker(ctx context.Context, e *Env, id, path, want string) []report.Finding {
