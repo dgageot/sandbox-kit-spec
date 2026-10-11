@@ -28,10 +28,10 @@ jobs:
           version: 3.53.1
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
-
-      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-
+      # Before QEMU setup: it pulls its binfmt image from Docker Hub, and
+      # anonymously that pull has been refused with toomanyrequests. A
+      # cached image covered it then; on a cache miss the setup has
+      # nothing to fall back to.
       - name: Login to Docker Hub
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         env:
@@ -41,6 +41,10 @@ jobs:
           DOCKERHUB_OIDC_EXPIREIN: "3600"
         with:
           username: ${{ vars.DOCKERHUB_ORGANIZATION }}
+
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       - name: Push frontend
         run: |

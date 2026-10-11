@@ -51,6 +51,18 @@ jobs:
       # would have skipped docs/, examples/ and tck/ entirely. The target
       # runs one pinned image over the file set .markdownlint-cli2.yaml
       # names, which is what a contributor runs locally.
+      #
+      # That image comes from Docker Hub, whose anonymous pull limit is
+      # shared by every job on a runner's IP and has failed this step.
+      # The read-only org bot lifts it. Fork and Dependabot pull requests
+      # get no Actions secrets, so they skip the login and pull anonymously
+      # rather than fail on an empty password.
+      - name: Log in to Docker Hub (read-only)
+        if: github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]')
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          username: ${{ vars.DOCKERPUBLICBOT_USERNAME }}
+          password: ${{ secrets.DOCKERPUBLICBOT_READ_PAT }}
       - run: task lint:md
 
   test:
