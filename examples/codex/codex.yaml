@@ -19,7 +19,7 @@ kind: workload
 
 args:
   version:
-    default: "0.161.0"
+    default: "0.162.1"
     pattern: '^[0-9]+\.[0-9]+\.[0-9]+$'
     description: Codex CLI release to install
     buildArg: CODEX_VERSION
@@ -61,7 +61,6 @@ capabilities:
           - auth.openai.com:443
           - chatgpt.com:443
           - files.openai.com:443
-          - registry.npmjs.org:443
           - releases.openai.com:443
           - api.github.com:443
           - github.com:443

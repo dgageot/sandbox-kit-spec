@@ -18,7 +18,7 @@ kind: mixin
 
 args:
   version:
-    default: "0.161.0"
+    default: "0.162.1"
     pattern: '^[0-9]+\.[0-9]+\.[0-9]+$'
     description: Codex CLI release to install
     buildArg: CODEX_VERSION
@@ -43,10 +43,11 @@ provides: ["codex@${{ kit.args.version }}"]
 capabilities:
   # Every domain the credential injects into or routes to, plus the
   # non-credential domains codex itself needs: files.openai.com
-  # (attachments/uploads at startup), the GitHub hosts (codex's native
-  # binary checks releases for updates and fetches skills/plugins), and
-  # registry.npmjs.org (the npm-based `codex upgrade` action). The base's
-  # apt mirrors stay with the base.
+  # (attachments/uploads at startup) and the GitHub hosts (codex checks
+  # releases for updates and fetches skills/plugins). No npm registry:
+  # the package lives outside CODEX_HOME and came from no package
+  # manager, so codex offers no upgrade action to run. The base's apt
+  # mirrors stay with the base.
   - type: com.docker.sandbox/network-policy@1
     config:
       runtime:
@@ -56,7 +57,6 @@ capabilities:
           - auth.openai.com:443
           - chatgpt.com:443
           - files.openai.com:443
-          - registry.npmjs.org:443
           - releases.openai.com:443
           - api.github.com:443
           - github.com:443

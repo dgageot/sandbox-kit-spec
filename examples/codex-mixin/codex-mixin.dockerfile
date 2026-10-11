@@ -3,34 +3,39 @@ FROM dhi.io/debian-base:trixie-dev AS build
 ARG CODEX_VERSION
 ARG TARGETARCH
 RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates
-# Codex is carried as the platform half of its npm package: a
-# vendor/<triple>/ tree with bin/codex and bin/codex-code-mode-host beside
-# codex-resources/ (bwrap, zsh, rg, the voice libraries). That layout is
-# what the CLI calls a complete local package, and it will not start its
-# background server — which the interactive TUI uses by default — from a
-# binary without it: "this CLI has no complete local package". The GitHub
-# release tarball is exactly such a bare binary, so the overlay ships the
-# package tree instead, fetched from the npm registry as a plain tarball
-# (no node needed here or on the base), and puts symlinks on PATH. The
-# binary finds its siblings through its own resolved path, so a link is
-# enough; codex spawns codex-code-mode-host that way for Code Mode.
+# Codex is carried as the complete package its release publishes,
+# codex-package-<triple>.tar.gz: bin/codex and bin/codex-code-mode-host
+# beside codex-resources/ (bwrap, zsh, the voice libraries), codex-path/rg,
+# and the codex-package.json manifest. The CLI will not start its
+# background server — which the interactive TUI uses by default — without
+# that layout around it ("this CLI has no complete local package"), so the
+# bare codex-<triple>.tar.gz binary is not enough. This is the asset
+# upstream's install.sh unpacks; the script itself is not run, because it
+# installs under $CODEX_HOME, which is the agent's state, not image
+# content. The binary locates the package from its own resolved path, so
+# one link on PATH is enough.
 RUN case "$TARGETARCH" in \
-      amd64) npmarch=x64;   target=x86_64-unknown-linux-musl ;; \
-      arm64) npmarch=arm64; target=aarch64-unknown-linux-musl ;; \
+      amd64) target=x86_64-unknown-linux-musl ;; \
+      arm64) target=aarch64-unknown-linux-musl ;; \
       *) echo "unsupported TARGETARCH: $TARGETARCH" >&2; exit 1 ;; \
     esac \
- && mkdir -p /out/opt/codex /out/usr/local/bin \
- && curl -fsSL "https://registry.npmjs.org/@openai/codex/-/codex-${CODEX_VERSION}-linux-${npmarch}.tgz" \
-      | tar -xz -C /out/opt/codex --strip-components=1 \
- && for bin in codex codex-code-mode-host; do \
-      test -x "/out/opt/codex/vendor/${target}/bin/${bin}" \
-      && ln -s "/opt/codex/vendor/${target}/bin/${bin}" "/out/usr/local/bin/${bin}"; \
-    done \
- # npm tarballs preserve the packer's uid; as image content on an unknown
- # base that uid may be a real account, so the tree is handed to root.
+ && release="https://github.com/openai/codex/releases/download/rust-v${CODEX_VERSION}" \
+ && asset="codex-package-${target}.tar.gz" \
+ && mkdir -p /tmp/codex /out/opt/codex /out/usr/local/bin \
+ && cd /tmp/codex \
+ && curl -fsSLO "${release}/${asset}" \
+ && curl -fsSLO "${release}/codex-package_SHA256SUMS" \
+ && grep "  ${asset}\$" codex-package_SHA256SUMS | sha256sum -c - \
+ && tar -xzf "${asset}" -C /out/opt/codex \
+ && ln -s /opt/codex/bin/codex /out/usr/local/bin/codex \
+ && rm -rf /tmp/codex \
+ # Release tarballs carry the CI runner's uid; as image content on an
+ # unknown base that uid may be a real account, so the tree goes to root.
  && chown -R 0:0 /out \
- # The pin is a claim about content: re-read it from the tree that ships.
- && "/out/opt/codex/vendor/${target}/bin/codex" --version | grep -q "${CODEX_VERSION}"
+ # The pin is a claim about content: re-read it from the tree that ships,
+ # in both the manifest the CLI trusts and the binary itself.
+ && grep -q "\"version\": \"${CODEX_VERSION}\"" /out/opt/codex/codex-package.json \
+ && /out/opt/codex/bin/codex --version | grep -q "${CODEX_VERSION}"
 
 # `notify` hook the config seed points Codex at: it reports a completed
 # turn to sbx Desktop through the MCP gateway and is a silent no-op when
@@ -53,7 +58,7 @@ export IS_SANDBOX=1
 export GIT_TERMINAL_PROMPT=0
 EOF
 
-# The overlay: the package tree under /opt/codex, its links on PATH, and
+# The overlay: the package under /opt/codex, its link on PATH, and
 # the profile.d exports, landing on any base.
 FROM scratch
 COPY --from=build /out /
