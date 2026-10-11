@@ -264,6 +264,7 @@ var mutations = map[string][]string{
 	"volume-refusal-destroys-storage":   {"volume@1/recreate-config-compatible"},
 	"volume-refusal-resets-mode":        {"volume@1/recreate-config-compatible"},
 	"volume-refuses-matching":           {"volume@1/matching-requests-merge"},
+	"volume-refuses-matching-tmpfs":     {"volume@1/matching-requests-merge"},
 	"volume-compares-provenance":        {"volume@1/matching-requests-merge"},
 	"volume-compares-optionality":       {"volume@1/matching-requests-merge"},
 	"volume-raw-paths":                  {"volume@1/matching-requests-merge", "volume@1/no-silent-merge"},

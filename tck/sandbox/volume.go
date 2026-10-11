@@ -58,10 +58,12 @@ func volumeMatching(ctx context.Context, e *Env) []report.Finding {
 	for _, pair := range []struct {
 		first, second string
 		args          map[string]string
+		tmpfs         bool
 	}{
-		{"volume-state", "volume-state-other", nil},
-		{"volume-state-unspecified", "volume-state-empty", nil},
-		{"volume-state", "volume-state-fraction", map[string]string{"volume_size": "1.5g"}},
+		{"volume-state", "volume-state-other", nil, false},
+		{"volume-state-unspecified", "volume-state-empty", nil, false},
+		{"volume-state", "volume-state-fraction", map[string]string{"volume_size": "1.5g"}, false},
+		{"volume-state-tmpfs", "volume-state-tmpfs-other", nil, true},
 	} {
 		id, remove, err := e.sandbox(ctx, []string{fixtureWorkload, pair.first, pair.second}, pair.args)
 		if err != nil {
@@ -70,9 +72,14 @@ func volumeMatching(ctx context.Context, e *Env) []report.Finding {
 		// Defer even failed observations so allocation/mount failures cannot
 		// leak the instance under test.
 		defer remove()
+		wantPaths := []string{volumePath, volumeOtherPath}
+		if pair.tmpfs {
+			// The allocation observation reports block storage only.
+			wantPaths = nil
+		}
 		paths, err := e.Adapter.VolumePaths(ctx, id)
-		if err != nil || !slices.Equal(sorted(paths), []string{volumePath, volumeOtherPath}) {
-			return []report.Finding{report.Failf("matching %s/%s requests must allocate one volume per cleaned path: %v (%v)", pair.first, pair.second, paths, err)}
+		if err != nil || !slices.Equal(sorted(paths), wantPaths) {
+			return []report.Finding{report.Failf("matching %s/%s block allocation paths: got %v, want %v (%v)", pair.first, pair.second, paths, wantPaths, err)}
 		}
 		for _, path := range []string{volumePath, volumeOtherPath} {
 			if f := volumeProbe(ctx, e, id, "mounted", path, "", "", ""); len(f) > 0 {

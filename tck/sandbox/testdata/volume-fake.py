@@ -172,6 +172,9 @@ def requests(kits, overrides):
                              _size_present=True, _mode_present=True,
                              _tmpfs_present=tmpfs), '', False, {}),
         ]:
+            if (path in result and broken == 'volume-refuses-matching-tmpfs'
+                    and config['tmpfs'] and equivalent(result[path], config)):
+                refuse('matching tmpfs requests rejected at ' + path)
             if path in result and broken == 'volume-compares-provenance' and sources[path] != source:
                 refuse('diagnostic provenance differs at ' + path)
             if path in result and broken == 'volume-compares-optionality' and optionalities[path] != optional:

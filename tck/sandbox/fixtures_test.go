@@ -16,7 +16,7 @@ import (
 func TestFixturesAreValidKits(t *testing.T) {
 	matches, err := filepath.Glob(filepath.Join("testdata", "fixtures", "*", "*.yaml"))
 	require.NoError(t, err)
-	require.Len(t, matches, 88, "every fixture directory needs its descriptor")
+	require.Len(t, matches, 89, "every fixture directory needs its descriptor")
 
 	for _, path := range matches {
 		t.Run(filepath.Base(path), func(t *testing.T) {
@@ -127,4 +127,34 @@ func TestPublishedVolumeFixtureMatchesPublisher(t *testing.T) {
 	require.NoError(t, err)
 	require.JSONEq(t, string(want), string(got))
 	require.Len(t, fixture.Capabilities, 2)
+}
+
+func TestMatchingTmpfsFixturesMerge(t *testing.T) {
+	var contributions []spec.Contribution
+	for _, name := range []string{"volume-state-tmpfs", "volume-state-tmpfs-other"} {
+		raw, err := os.ReadFile(filepath.Join(FixtureDir, name, name+".yaml"))
+		require.NoError(t, err)
+		d, err := spec.Decode(raw)
+		require.NoError(t, err)
+		values, err := spec.KitArgValues(d.Args, nil)
+		require.NoError(t, err)
+		expanded, err := spec.ExpandCreateArgs(raw, d.Args, values)
+		require.NoError(t, err)
+		d, err = spec.Decode(expanded)
+		require.NoError(t, err)
+		_, err = spec.ValidateEffective(expanded, d)
+		require.NoError(t, err)
+		contributions = append(contributions, spec.Contribution{Reference: name, Descriptor: d})
+	}
+	require.NotEqual(t, contributions[0].Descriptor.Capabilities[0].Config["path"],
+		contributions[1].Descriptor.Capabilities[0].Config["path"],
+		"matching tmpfs fixtures must exercise distinct path spellings")
+	published, err := spec.Merge(contributions, spec.MergeOptions{})
+	require.NoError(t, err)
+	volumes, err := spec.VolumesOf(published.Descriptor.Capabilities)
+	require.NoError(t, err)
+	require.Equal(t, []spec.Volume{
+		{Path: volumePath, Size: "1g", Mode: "0700", Tmpfs: true},
+		{Path: volumeOtherPath, Size: "1g", Mode: "0700", Tmpfs: true},
+	}, volumes, "the publisher collapses both matching tmpfs destinations")
 }
