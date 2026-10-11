@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"testing"
 
 	ocispecs "github.com/opencontainers/image-spec/specs-go/v1"
@@ -587,5 +589,328 @@ func TestKitDeclarationsPreserveFinalEnvironment(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, reference+"/.config/tool", lc.Files[0].Path)
 		})
+	}
+}
+
+// Exercise the publisher's re-export path, not default expansion: two
+// independently published Kits feed text references into the set merge.
+func TestSetReExportsVolumeRequests(t *testing.T) {
+	for _, tc := range []struct {
+		name, field, first, second, value, other string
+		match                                    bool
+	}{
+		{"shared size", "size", "${{ kit.args.shared }}", "${{ kit.args.shared }}", "2g", "", true},
+		{"shared byte size", "size", "${{ kit.args.shared }}", "${{ kit.args.shared }}", "1024", "", true},
+		{"shared fractional byte size", "size", "${{ kit.args.shared }}", "${{ kit.args.shared }}", "1.5", "", true},
+		{"shared large byte size", "size", "${{ kit.args.shared }}", "${{ kit.args.shared }}", "18446744073709551617", "", true},
+		{"equivalent byte size", "size", "${{ kit.args.shared }}", "${{ kit.args.other }}", "1024", "1k", true},
+		{"distinct precise byte sizes", "size", "${{ kit.args.shared }}", "${{ kit.args.other }}", "9007199254740992", "9007199254740993", false},
+		{"shared unpadded mode", "mode", "${{ kit.args.shared }}", "${{ kit.args.shared }}", "755", "", true},
+		{"equivalent unpadded mode", "mode", "${{ kit.args.shared }}", "${{ kit.args.other }}", "755", "0755", true},
+		{"shared zero byte size", "size", "${{ kit.args.shared }}", "${{ kit.args.shared }}", "0", "", true},
+		{"equivalent independent sizes", "size", "${{ kit.args.shared }}", "${{ kit.args.other }}", "1g", "1024m", true},
+		{"conflicting independent sizes", "size", "${{ kit.args.shared }}", "${{ kit.args.other }}", "1g", "2g", false},
+		{"equivalent literal size", "size", "${{ kit.args.shared }}", "1024m", "1g", "", true},
+		{"conflicting literal size", "size", "${{ kit.args.shared }}", "2g", "1g", "", false},
+		{"shared mode", "mode", "${{ kit.args.shared }}", "${{ kit.args.shared }}", "0755", "", true},
+		{"shared destination", "path", "${{ kit.args.shared }}", "${{ kit.args.shared }}", "/cache", "", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			setArgs := map[string]spec.Arg{"shared": {Required: true}, "other": {Required: true}}
+			var inputs []spec.Contribution
+			for i, supplied := range []string{tc.first, tc.second} {
+				config := map[string]any{"path": "/cache", tc.field: "${{ kit.args.request }}"}
+				published := &spec.Descriptor{SchemaVersion: spec.SchemaVersion, Kind: spec.KindMixin,
+					Args:         map[string]spec.Arg{"request": {Required: true}},
+					Capabilities: []spec.Capability{{Type: spec.CapabilityVolume, Config: config}},
+				}
+				raw, err := json.Marshal(published)
+				require.NoError(t, err)
+				_, err = spec.ValidatePublished(raw, published)
+				require.NoError(t, err)
+				declarations, _, err := kitDeclarations(published, spec.Kit{
+					Args: map[string]string{"request": supplied},
+				}, setArgs)
+				require.NoError(t, err)
+				inputs = append(inputs, spec.Contribution{Reference: fmt.Sprintf("cache-kit-%d", i), Descriptor: declarations})
+			}
+			merged, err := spec.Merge(inputs, spec.MergeOptions{})
+			require.NoError(t, err, "publication cannot judge sizes that still depend on create-phase inputs")
+			merged.Descriptor.Args = setArgs
+			raw, err := publishedSetDescriptor(merged.Descriptor)
+			require.NoError(t, err)
+			members := spec.DeclaredCapabilities(merged.Descriptor.Capabilities)
+			require.Len(t, members, 2, "keep both requests until their concrete settings can reconcile")
+			require.Equal(t, tc.first, members[0].Config[tc.field])
+			require.Equal(t, "cache-kit-0", members[0].Source.Kit)
+			require.Equal(t, "cache-kit-1", members[1].Source.Kit)
+
+			expanded, err := spec.ExpandCreateArgs(raw, setArgs, map[string]string{"shared": tc.value, "other": tc.other})
+			require.NoError(t, err)
+			d, err := spec.Decode(expanded)
+			require.NoError(t, err)
+			_, err = spec.ValidateExpandedDeclarations(expanded, d)
+			require.NoError(t, err)
+			selected, err := spec.SelectCapabilities(t.Context(), d, spec.Supported(spec.CapabilityVolume))
+			require.NoError(t, err)
+			d.Capabilities = selected.Capabilities
+			composed, err := spec.Compose([]spec.Contribution{{Reference: "published-set", Descriptor: d}})
+			if !tc.match {
+				require.Nil(t, composed)
+				require.ErrorContains(t, err, "different com.docker.sandbox/volume@1 configurations at /cache")
+				require.ErrorContains(t, err, "cache-kit-0")
+				require.ErrorContains(t, err, "cache-kit-1")
+				return
+			}
+			require.NoError(t, err)
+			volumes, err := spec.VolumesOf(composed.Capabilities)
+			require.NoError(t, err)
+			require.Len(t, volumes, 1)
+			require.Equal(t, tc.value, composed.Capabilities[0].Config[tc.field])
+		})
+	}
+}
+
+func TestSetReExportStillReconcilesConcreteStorage(t *testing.T) {
+	for _, tc := range []struct {
+		name, secondType string
+		secondConfig     map[string]any
+		conflict         string
+	}{
+		{"matching volumes", spec.CapabilityVolume, map[string]any{"path": "/cache/./", "size": "1024m", "mode": "755", "tmpfs": false}, ""},
+		{"different size", spec.CapabilityVolume, map[string]any{"path": "/cache", "size": "2g", "mode": "0755"}, "different"},
+		{"different mode", spec.CapabilityVolume, map[string]any{"path": "/cache", "size": "1g", "mode": "0700"}, "different"},
+		{"different backing", spec.CapabilityVolume, map[string]any{"path": "/cache", "size": "1g", "mode": "0755", "tmpfs": true}, "different"},
+		{"host mount collision", spec.CapabilityHostMount, map[string]any{"path": "/cache"}, "host mount has one owner"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			setArgs := map[string]spec.Arg{"shared_size": {Required: true}}
+			var inputs []spec.Contribution
+			for i := range 2 {
+				concrete := spec.Capability{Type: spec.CapabilityVolume, Optional: true,
+					Config: map[string]any{"path": "/cache", "size": "1g", "mode": "0755"}}
+				if i == 1 {
+					concrete = spec.Capability{Type: tc.secondType, Name: "Shared cache", Config: tc.secondConfig}
+				}
+				published := &spec.Descriptor{SchemaVersion: spec.SchemaVersion, Kind: spec.KindMixin,
+					Args: map[string]spec.Arg{"size": {Required: true}},
+					Capabilities: []spec.Capability{
+						{Type: spec.CapabilityVolume, Config: map[string]any{"path": "/dynamic", "size": "${{ kit.args.size }}"}},
+						concrete,
+					},
+				}
+				raw, err := json.Marshal(published)
+				require.NoError(t, err)
+				_, err = spec.ValidatePublished(raw, published)
+				require.NoError(t, err)
+				declarations, _, err := kitDeclarations(published, spec.Kit{
+					Args: map[string]string{"size": "${{ kit.args.shared_size }}"},
+				}, setArgs)
+				require.NoError(t, err)
+				inputs = append(inputs, spec.Contribution{Reference: fmt.Sprintf("cache-kit-%d", i), Descriptor: declarations})
+			}
+			merged, err := spec.Merge(inputs, spec.MergeOptions{})
+			if tc.conflict != "" {
+				require.Nil(t, merged)
+				require.ErrorContains(t, err, tc.conflict)
+				require.ErrorContains(t, err, "cache-kit-0")
+				require.ErrorContains(t, err, "cache-kit-1")
+				return
+			}
+			require.NoError(t, err)
+			merged.Descriptor.Args = setArgs
+			_, err = publishedSetDescriptor(merged.Descriptor)
+			require.NoError(t, err)
+			members := spec.DeclaredCapabilities(merged.Descriptor.Capabilities)
+			require.Len(t, members, 3, "concrete requests collapse while both unresolved requests survive")
+			require.Equal(t, "/dynamic", members[0].Config["path"])
+			require.Equal(t, "/cache", members[1].Config["path"])
+			require.Equal(t, "/dynamic", members[2].Config["path"])
+			require.Equal(t, "Shared cache", members[1].Name)
+			require.Nil(t, merged.Descriptor.Capabilities[1].Group, "concrete storage remains reconcilable by enclosing sets")
+			require.False(t, members[1].Optional, "the required contributor wins")
+			require.Equal(t, &spec.CapabilitySource{Kit: "cache-kit-0", Path: "capabilities[1]"}, members[1].Source)
+			require.Equal(t, "${{ kit.args.shared_size }}", members[0].Config["size"])
+			require.Equal(t, "${{ kit.args.shared_size }}", members[2].Config["size"])
+			_, err = spec.Merge([]spec.Contribution{
+				{Reference: "published-set", Descriptor: merged.Descriptor},
+				{Reference: "larger-cache", Descriptor: &spec.Descriptor{SchemaVersion: spec.SchemaVersion, Kind: spec.KindMixin,
+					Capabilities: []spec.Capability{{Type: spec.CapabilityVolume, Config: map[string]any{"path": "/cache", "size": "2g", "mode": "0755"}}},
+				}},
+			}, spec.MergeOptions{})
+			require.ErrorContains(t, err, "different com.docker.sandbox/volume@1 configurations at /cache", "enclosing sets still reject concrete conflicts")
+		})
+	}
+}
+
+func TestSetReExportRejectsLiteralStorageCollisions(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		first, second spec.Capability
+	}{
+		{"volume size", spec.Capability{Type: spec.CapabilityVolume, Config: map[string]any{"path": "/cache", "size": "1g"}}, spec.Capability{Type: spec.CapabilityVolume, Config: map[string]any{"path": "/data/../cache", "size": "${{ kit.args.request }}"}}},
+		{"volume mode", spec.Capability{Type: spec.CapabilityVolume, Config: map[string]any{"path": "/cache"}}, spec.Capability{Type: spec.CapabilityVolume, Config: map[string]any{"path": "/cache/./", "mode": "${{ kit.env.MODE }}"}}},
+		{"host and deferred volume", spec.Capability{Type: spec.CapabilityHostMount, Config: map[string]any{"path": "/cache"}}, spec.Capability{Type: spec.CapabilityVolume, Config: map[string]any{"path": "/cache/./", "size": "${{ kit.args.request }}"}}},
+		{"volume and deferred host", spec.Capability{Type: spec.CapabilityVolume, Config: map[string]any{"path": "/cache/./"}}, spec.Capability{Type: spec.CapabilityHostMount, Config: map[string]any{"path": "/cache", "mode": "${{ kit.args.request }}"}}},
+		{"host mode", spec.Capability{Type: spec.CapabilityHostMount, Config: map[string]any{"path": "/cache"}}, spec.Capability{Type: spec.CapabilityHostMount, Config: map[string]any{"path": "/cache", "mode": "${{ kit.args.request }}"}}},
+	} {
+		for _, reverse := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/reverse=%t", tc.name, reverse), func(t *testing.T) {
+				capabilities := []spec.Capability{tc.first, tc.second}
+				if reverse {
+					capabilities[0], capabilities[1] = capabilities[1], capabilities[0]
+				}
+				published := &spec.Descriptor{SchemaVersion: spec.SchemaVersion, Kind: spec.KindMixin,
+					Args: map[string]spec.Arg{"request": {Required: true}}, Capabilities: capabilities}
+				raw, err := json.Marshal(published)
+				require.NoError(t, err)
+				_, err = spec.ValidatePublished(raw, published)
+				require.Error(t, err, "unrelated deferred settings cannot hide literal storage collisions at publication")
+				_, _, err = kitDeclarations(published, spec.Kit{Args: map[string]string{"request": "${{ kit.args.shared }}"}}, map[string]spec.Arg{"shared": {Required: true}})
+				require.Error(t, err, "re-export cannot turn an invalid declaration block into independently reconcilable requests")
+			})
+		}
+	}
+}
+
+func TestSetReExportRetainsStorageDeclarationBlocks(t *testing.T) {
+	for _, tc := range []struct {
+		name, firstType, secondType, secondPath string
+	}{
+		{"two argument paths", spec.CapabilityVolume, spec.CapabilityVolume, "${{ kit.args.second }}"},
+		{"literal and argument path", spec.CapabilityVolume, spec.CapabilityVolume, "/cache/./"},
+		{"environment and argument path", spec.CapabilityVolume, spec.CapabilityVolume, "${{ kit.env.CACHE }}"},
+		{"host mount duplicates", spec.CapabilityHostMount, spec.CapabilityHostMount, "${{ kit.args.second }}"},
+		{"host and private collision", spec.CapabilityHostMount, spec.CapabilityVolume, "${{ kit.args.second }}"},
+		{"private and host collision", spec.CapabilityVolume, spec.CapabilityHostMount, "${{ kit.args.second }}"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			args := map[string]spec.Arg{"first": {Required: true}, "second": {Required: true}}
+			input := &spec.Descriptor{SchemaVersion: spec.SchemaVersion, Kind: spec.KindMixin, Args: args,
+				Capabilities: []spec.Capability{
+					{Type: tc.firstType, Optional: true, Config: map[string]any{"path": "${{ kit.args.first }}"},
+						Source: &spec.CapabilitySource{Kit: "diagnostic-one", Path: "capabilities[7]"}},
+					{Type: tc.secondType, Optional: true, Config: map[string]any{"path": tc.secondPath},
+						Source: &spec.CapabilitySource{Kit: "diagnostic-two", Path: "capabilities[8]"}},
+				}}
+			declarations, _, err := kitDeclarations(input, spec.Kit{Args: map[string]string{
+				"first": "${{ kit.args.first }}", "second": "${{ kit.args.second }}",
+			}}, args)
+			require.NoError(t, err)
+			merged, err := spec.Merge([]spec.Contribution{{Reference: "cache-kit", Descriptor: declarations}}, spec.MergeOptions{})
+			require.NoError(t, err)
+			for depth := range 3 {
+				merged.Descriptor.Args = args
+				raw, err := publishedSetDescriptor(merged.Descriptor)
+				require.NoError(t, err)
+				// Exercise the actual published JSON, including a nested set.
+				roundTrip, err := spec.Decode(raw)
+				require.NoError(t, err)
+				for _, collide := range []bool{false, true} {
+					first := "/other"
+					if collide {
+						first = "/cache"
+					}
+					second := "/data/../cache"
+					if tc.secondType == spec.CapabilityHostMount {
+						second = "/cache"
+					}
+					expanded, err := spec.ExpandCreateArgs(raw, args, map[string]string{"first": first, "second": second})
+					require.NoError(t, err)
+					d, err := spec.Decode(expanded)
+					require.NoError(t, err)
+					d, err = spec.ExpandEnvironment(d, map[string]string{"CACHE": "/cache/"})
+					require.NoError(t, err)
+					expanded, err = json.Marshal(d)
+					require.NoError(t, err)
+					_, err = spec.ValidateExpandedDeclarations(expanded, d)
+					if !collide {
+						require.NoError(t, err, "depth %d: distinct requests remain valid", depth)
+						selected, err := spec.SelectCapabilities(t.Context(), d, func(_ context.Context, _ spec.Descriptor, c spec.Capability) spec.CapabilityDecision {
+							return spec.CapabilityDecision{Accepted: c.Config["path"] != "/other"}
+						})
+						require.NoError(t, err)
+						require.Len(t, selected.Capabilities, 1, "optional declarations still select independently")
+						continue
+					}
+					require.Error(t, err, "depth %d: publication must retain same-block collisions", depth)
+					_, err = spec.SelectCapabilities(t.Context(), d, func(context.Context, spec.Descriptor, spec.Capability) spec.CapabilityDecision {
+						t.Fatal("invalid expanded declarations must fail before even a rejecting selector runs")
+						return spec.CapabilityDecision{}
+					})
+					require.Error(t, err)
+				}
+				merged, err = spec.Merge([]spec.Contribution{{Reference: "nested-set", Descriptor: roundTrip}}, spec.MergeOptions{})
+				require.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestSetReExportScopesBlocksToContributionOccurrences(t *testing.T) {
+	args := map[string]spec.Arg{"path": {Required: true}}
+	input := &spec.Descriptor{SchemaVersion: spec.SchemaVersion, Kind: spec.KindMixin, Args: args,
+		Capabilities: []spec.Capability{{Type: spec.CapabilityVolume, Config: map[string]any{"path": "${{ kit.args.path }}"}}}}
+	for depth := range 3 {
+		merged, err := spec.Merge([]spec.Contribution{
+			{Reference: "same-reference", Descriptor: input},
+			{Reference: "same-reference", Descriptor: input},
+		}, spec.MergeOptions{})
+		require.NoError(t, err)
+		merged.Descriptor.Args = args
+		raw, err := publishedSetDescriptor(merged.Descriptor)
+		require.NoError(t, err)
+		expanded, err := spec.ExpandCreateArgs(raw, args, map[string]string{"path": "/cache"})
+		require.NoError(t, err)
+		d, err := spec.Decode(expanded)
+		require.NoError(t, err)
+		_, err = spec.ValidateExpandedDeclarations(expanded, d)
+		require.NoError(t, err, "depth %d: separate occurrences remain separate declaration blocks", depth)
+		selected, err := spec.SelectCapabilities(t.Context(), d, spec.Supported(spec.CapabilityVolume))
+		require.NoError(t, err)
+		d.Capabilities = selected.Capabilities
+		composed, err := spec.Compose([]spec.Contribution{{Reference: "set", Descriptor: d}})
+		require.NoError(t, err)
+		require.Len(t, composed.Capabilities, 1)
+		require.Empty(t, composed.Capabilities[0].DeclarationBlocks)
+		input, err = spec.Decode(raw)
+		require.NoError(t, err)
+	}
+}
+
+func TestSetReExportRetainsEveryConcreteStorageBlock(t *testing.T) {
+	args := map[string]spec.Arg{"first": {Required: true}, "second": {Required: true}}
+	var contributions []spec.Contribution
+	for _, arg := range []string{"first", "second"} {
+		contributions = append(contributions, spec.Contribution{Reference: arg, Descriptor: &spec.Descriptor{
+			SchemaVersion: spec.SchemaVersion, Kind: spec.KindMixin, Args: args,
+			Capabilities: []spec.Capability{
+				{Type: spec.CapabilityVolume, Config: map[string]any{"path": "${{ kit.args." + arg + " }}"}},
+				{Type: spec.CapabilityVolume, Config: map[string]any{"path": "/cache"}},
+			},
+		}})
+	}
+	merged, err := spec.Merge(contributions, spec.MergeOptions{})
+	require.NoError(t, err)
+	merged.Descriptor.Args = args
+	for depth := range 2 {
+		merged.Descriptor.Args = args
+		raw, err := publishedSetDescriptor(merged.Descriptor)
+		require.NoError(t, err)
+		require.Len(t, merged.Descriptor.Capabilities[1].DeclarationBlocks, 2, "collapsed concrete request belongs to both original blocks")
+		for _, collision := range []string{"first", "second"} {
+			values := map[string]string{"first": "/one", "second": "/two"}
+			values[collision] = "/cache/"
+			expanded, err := spec.ExpandCreateArgs(raw, args, values)
+			require.NoError(t, err)
+			d, err := spec.Decode(expanded)
+			require.NoError(t, err)
+			_, err = spec.ValidateExpandedDeclarations(expanded, d)
+			require.Error(t, err, "depth %d: concrete reconciliation must retain the %s block", depth, collision)
+		}
+		d, err := spec.Decode(raw)
+		require.NoError(t, err)
+		merged, err = spec.Merge([]spec.Contribution{{Reference: "nested", Descriptor: d}}, spec.MergeOptions{})
+		require.NoError(t, err)
 	}
 }

@@ -251,8 +251,11 @@ func TestSchemaMatchesSpecConstants(t *testing.T) {
 	require.NotContains(t, at(t, credential, "definitions", "tomlValue")["type"].([]any), "null")
 
 	volume := loadJSON(t, perTypeSchemaPath(CapabilityVolume))
-	require.Equal(t, octalMode.String(), literalPattern(t, at(t, volume, "properties", "mode")))
-	require.Equal(t, sizeBytes.String(), literalPattern(t, at(t, volume, "properties", "size")))
+	// Optional volume settings accept an empty string as unspecified,
+	// including after create-argument expansion. Other types keep their
+	// own presence rules and literal patterns.
+	require.Equal(t, "^("+strings.TrimSuffix(strings.TrimPrefix(octalMode.String(), "^"), "$")+")?$", literalPattern(t, at(t, volume, "properties", "mode")))
+	require.Equal(t, "^("+strings.TrimSuffix(strings.TrimPrefix(sizeBytes.String(), "^"), "$")+")?$", literalPattern(t, at(t, volume, "properties", "size")))
 	assertAcceptsKitArg(t, at(t, volume, "properties", "size"), "bearing")
 	assertAcceptsKitArg(t, at(t, volume, "properties", "mode"), "bearing")
 	assertAcceptsKitArg(t, at(t, volume, "properties", "path"), "bearing")
@@ -521,5 +524,18 @@ func TestGroupSchemaMatchesGrammar(t *testing.T) {
 	require.Equal(t, "#/definitions/capabilityMember", at(t, group, "properties", "capabilities", "items")["$ref"])
 	member := at(t, defs, "capabilityMember")["allOf"].([]any)
 	require.Equal(t, []any{"optional"}, at(t, member[1].(map[string]any), "not")["required"])
+	require.Equal(t, []any{"declarationBlocks"}, at(t, member[2].(map[string]any), "not")["required"])
+	blocks := at(t, defs, "declarationBlocks")
+	require.Equal(t, "array", blocks["type"])
+	require.Equal(t, true, blocks["uniqueItems"])
+	require.Equal(t, "string", at(t, blocks, "items")["type"])
+	require.Equal(t, float64(1), at(t, blocks, "items")["minLength"])
+	require.Equal(t, "#/definitions/declarationBlocks", at(t, defs, "capability", "properties", "declarationBlocks")["$ref"])
+	item := at(t, defs, "capabilityItem")["oneOf"].([]any)
+	wrapper := item[1].(map[string]any)
+	require.Equal(t, "#/definitions/declarationBlocks", at(t, wrapper, "properties", "declarationBlocks")["$ref"])
+	constraint := wrapper["allOf"].([]any)[0].(map[string]any)
+	require.Equal(t, []any{"declarationBlocks"}, at(t, constraint, "if")["required"])
+	require.Equal(t, float64(1), at(t, constraint, "then", "properties", "group", "properties", "capabilities")["maxItems"])
 	require.ElementsMatch(t, allCapabilityTypes(), KnownCapabilities())
 }

@@ -9,6 +9,7 @@ capabilities:
             startup: [{command: "true"}]
           source: {kit: "registry.example/base:1.0.0", path: "capabilities[0]"}
     source: {kit: "registry.example/base:1.0.0", path: "capabilities[0]"}
+    declarationBlocks: ["0:0"]
   - group:
       optional: true
       capabilities:

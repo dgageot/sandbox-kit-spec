@@ -246,21 +246,29 @@ type Kit struct {
 
 // Capability is one typed, versioned capability request. The type string is
 // <namespace>/<name>@<version>: the namespace admits host-specific
-// capability types without touching this grammar, and the version moves
-// when the type's config schema does — capabilities evolve without a
-// descriptor schema-major bump.
+// capability types without touching this grammar. The version covers the
+// capability contract: config schema and observable behavior, including
+// composition and persistent-state transitions. Capabilities evolve without
+// a descriptor schema-major bump; RELEASES.md defines when versions move
+// and the maintainer-approved draft-stage exception.
 type Capability struct {
 	// Group is the alternative to an ordinary entry. It is not a capability
 	// type and must be selected before typed accessors are used.
 	Group *CapabilityGroup `json:"group,omitempty" yaml:"group,omitempty"`
 
+	// DeclarationBlocks preserves duplicate-validation boundaries when a
+	// publisher splits ordinary entries into independently selected groups.
+	// IDs are local to this descriptor; they do not identify trusted sources.
+	DeclarationBlocks []string `json:"declarationBlocks,omitempty" yaml:"declarationBlocks,omitempty"`
+
 	// Source preserves publisher attribution. It is untrusted diagnostic
 	// metadata; the consuming artifact still determines trust.
-	Source      *CapabilitySource `json:"source,omitempty" yaml:"source,omitempty"`
-	optionalSet bool
-	groupSet    bool
+	Source               *CapabilitySource `json:"source,omitempty" yaml:"source,omitempty"`
+	optionalSet          bool
+	groupSet             bool
+	declarationBlocksSet bool
 
-	// Type names the capability and its config-schema version, e.g.
+	// Type names the capability and its contract version, e.g.
 	// "com.docker.sandbox/network-policy@1".
 	Type string `json:"type,omitempty" yaml:"type,omitempty"`
 
@@ -309,9 +317,20 @@ func (c *Capability) UnmarshalYAML(unmarshal func(any) error) error {
 	if name, ok := keys["name"]; ok && name.ShortTag() != "!!str" {
 		return fmt.Errorf("capability name must be a string")
 	}
+	if blocks, ok := keys["declarationBlocks"]; ok {
+		if blocks.ShortTag() != "!!seq" {
+			return fmt.Errorf("declarationBlocks must be an array of strings")
+		}
+		for _, id := range blocks.Content {
+			if id.ShortTag() != "!!str" {
+				return fmt.Errorf("declarationBlocks must contain strings")
+			}
+		}
+	}
 	_, c.configSet = keys["config"]
 	_, c.optionalSet = keys["optional"]
 	_, c.groupSet = keys["group"]
+	_, c.declarationBlocksSet = keys["declarationBlocks"]
 	if _, stated := keys["source"]; stated && c.Source == nil {
 		return fmt.Errorf("capability source must be an object")
 	}
@@ -342,9 +361,24 @@ func (c *Capability) UnmarshalJSON(data []byte) error {
 	if name, ok := keys["name"]; ok && bytes.Equal(bytes.TrimSpace(name), []byte("null")) {
 		return fmt.Errorf("capability name must be a string")
 	}
+	if blocks, ok := keys["declarationBlocks"]; ok {
+		if bytes.Equal(bytes.TrimSpace(blocks), []byte("null")) {
+			return fmt.Errorf("declarationBlocks must be an array of strings")
+		}
+		var ids []json.RawMessage
+		if err := json.Unmarshal(blocks, &ids); err != nil {
+			return err
+		}
+		for _, id := range ids {
+			if bytes.Equal(bytes.TrimSpace(id), []byte("null")) {
+				return fmt.Errorf("declarationBlocks must contain strings")
+			}
+		}
+	}
 	_, c.configSet = keys["config"]
 	_, c.optionalSet = keys["optional"]
 	_, c.groupSet = keys["group"]
+	_, c.declarationBlocksSet = keys["declarationBlocks"]
 	if _, stated := keys["source"]; stated && c.Source == nil {
 		return fmt.Errorf("capability source must be an object")
 	}
@@ -806,14 +840,15 @@ func SkillsWritable(s AgentSkills) bool {
 	return SkillsMode(s) == SkillsReadWrite
 }
 
-// Volume is CapabilityVolume's config: one persistent (or tmpfs) path
-// and its characteristics.
+// Volume is CapabilityVolume's config: instance-owned storage at a cleaned
+// destination, independent of the Kit that requested it.
 type Volume struct {
 	Path string `json:"path" yaml:"path"`
 	Size string `json:"size,omitempty" yaml:"size,omitempty"`
 	// Tmpfs makes the path a tmpfs mount instead of a block volume.
 	Tmpfs bool `json:"tmpfs,omitempty" yaml:"tmpfs,omitempty"`
-	// Mode is an octal permission string, e.g. "1777".
+	// Mode is initial octal permissions, e.g. "1777". Reattachment does
+	// not reset permissions changed inside the sandbox.
 	Mode string `json:"mode,omitempty" yaml:"mode,omitempty"`
 }
 

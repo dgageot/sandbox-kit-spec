@@ -217,20 +217,54 @@ func DeclaredCapabilities(items []Capability) []Capability {
 }
 
 func validateCapabilityEntries(d *Descriptor) error {
-	if !HasGroups(d.Capabilities) {
+	hasBlocks := false
+	for _, item := range d.Capabilities {
+		hasBlocks = hasBlocks || len(item.DeclarationBlocks) > 0
+	}
+	if !HasGroups(d.Capabilities) && !hasBlocks {
 		return validateCapabilityBlock(d)
 	}
 	var errs ValidationErrors
-	var ordinary []Capability
-	var paths []string
+	type block struct {
+		members []Capability
+		paths   []string
+	}
+	blocks := map[string]*block{}
+	var blockOrder []string
+	addBlock := func(id string, member Capability, path string) {
+		if blocks[id] == nil {
+			blocks[id] = &block{}
+			blockOrder = append(blockOrder, id)
+		}
+		blocks[id].members = append(blocks[id].members, member)
+		blocks[id].paths = append(blocks[id].paths, path)
+	}
 	for i, c := range d.Capabilities {
 		at := fmt.Sprintf("capabilities[%d]", i)
 		if c.Source != nil && c.Source.Path == "" {
 			errs.add(fieldErrorf(at+".source", "path is required"))
 		}
+		seenBlocks := map[string]bool{}
+		for j, id := range c.DeclarationBlocks {
+			if id == "" || seenBlocks[id] {
+				errs.add(fieldErrorf(fmt.Sprintf("%s.declarationBlocks[%d]", at, j), "block id must be nonempty and unique"))
+				continue
+			}
+			seenBlocks[id] = true
+			member, path := c, at
+			if c.Group != nil {
+				if len(c.Group.Capabilities) != 1 {
+					errs.add(fieldErrorf(at+".declarationBlocks", "only ordinary entries and one-member groups may carry declaration blocks"))
+					continue
+				}
+				member, path = c.Group.Capabilities[0], at+".group.capabilities[0]"
+			}
+			addBlock(id, member, path)
+		}
 		if c.Group == nil && !c.groupSet {
-			ordinary = append(ordinary, c)
-			paths = append(paths, at)
+			if len(c.DeclarationBlocks) == 0 {
+				addBlock("", c, at)
+			}
 			continue
 		}
 		if c.Group == nil {
@@ -252,16 +286,21 @@ func validateCapabilityEntries(d *Descriptor) error {
 			if member.Group != nil || member.groupSet {
 				errs.add(fieldErrorf(memberPaths[j], "nested groups are not permitted"))
 			}
+			if len(member.DeclarationBlocks) > 0 || member.declarationBlocksSet {
+				errs.add(fieldErrorf(memberPaths[j]+".declarationBlocks", "group members must not state declaration blocks"))
+			}
 			if member.Optional || member.optionalSet {
 				errs.add(fieldErrorf(memberPaths[j]+".optional", "group members must not state optional"))
 			}
 		}
 		errs.add(remapCapabilityErrors(validateCapabilityBlock(&cp), memberPaths))
 	}
-	cp := *d
-	cp.Capabilities = ordinary
-	cp.declarationsOnly = true
-	errs.add(remapCapabilityErrors(validateCapabilityBlock(&cp), paths))
+	for _, id := range blockOrder {
+		cp := *d
+		cp.Capabilities = blocks[id].members
+		cp.declarationsOnly = true
+		errs.add(remapCapabilityErrors(validateCapabilityBlock(&cp), blocks[id].paths))
+	}
 	return errs.err()
 }
 
@@ -404,6 +443,10 @@ func SelectCapabilities(ctx context.Context, d *Descriptor, selectCapability Sel
 			if c.Source == nil {
 				c.Source = &CapabilitySource{Path: memberPath}
 			}
+			// All original blocks validated before selection. Effective
+			// grants no longer carry publication-only block membership.
+			c.DeclarationBlocks = nil
+			c.declarationBlocksSet = false
 			selected = append(selected, c)
 		}
 		if len(record.Rejected) > 0 {
@@ -418,17 +461,28 @@ func SelectCapabilities(ctx context.Context, d *Descriptor, selectCapability Sel
 
 func contributionsNeedDeferredMerge(contributions []Contribution) bool {
 	for _, c := range contributions {
-		if c.Descriptor != nil && (HasGroups(c.Descriptor.Capabilities) || HasEnvReferences(c.Descriptor.Capabilities)) {
+		if c.Descriptor == nil {
+			continue
+		}
+		if HasGroups(c.Descriptor.Capabilities) || HasEnvReferences(c.Descriptor.Capabilities) {
 			return true
+		}
+		for _, item := range c.Descriptor.Capabilities {
+			// A set may re-export storage destinations or settings. Keep
+			// their requests separate until create expands the values:
+			// instance keys and equivalence cannot judge placeholders.
+			if (item.Type == CapabilityVolume || item.Type == CapabilityHostMount) && capabilityIsParameterized(item) {
+				return true
+			}
 		}
 	}
 	return false
 }
 
-// preserveGroups preserves declarations until selection and environment
-// expansion can determine which concrete requests to reconcile.
-// Wrapping ordinary entries preserves their optionality and allows independent
-// singleton contributions without inventing a second publishing-only grammar.
+// preserveGroups preserves selection boundaries and unresolved declarations.
+// Concrete, ungrouped storage still reconciles at publication.
+// Wrapping the remaining ordinary entries preserves their optionality and
+// allows independent singleton contributions without a publishing-only grammar.
 func preserveGroups(contributions []Contribution, opts MergeOptions) (*MergeResult, error) {
 	stripped := make([]Contribution, len(contributions))
 	for i, c := range contributions {
@@ -444,8 +498,29 @@ func preserveGroups(contributions []Contribution, opts MergeOptions) (*MergeResu
 		return nil, err
 	}
 	count := 0
-	for _, contribution := range contributions {
+	storage := capabilityMerge{byKey: map[string]keyed{}, optional: map[string]bool{}}
+	storagePositions := map[string]int{}
+	for contributionIndex, contribution := range contributions {
+		// Remap descriptor-local IDs, even when a set includes the same
+		// reference twice. Attribution cannot provide structural identity.
+		blockIDs := map[string]string{}
+		remapBlock := func(id string) string {
+			if mapped, ok := blockIDs[id]; ok {
+				return mapped
+			}
+			mapped := fmt.Sprintf("%d:%d", contributionIndex, len(blockIDs))
+			blockIDs[id] = mapped
+			return mapped
+		}
 		for i, item := range contribution.Descriptor.Capabilities {
+			ids := item.DeclarationBlocks
+			item.DeclarationBlocks = nil
+			if len(ids) == 0 && item.Group == nil {
+				ids = []string{""}
+			}
+			for _, id := range ids {
+				item.DeclarationBlocks = append(item.DeclarationBlocks, remapBlock(id))
+			}
 			source := &CapabilitySource{Kit: contribution.Reference, Path: fmt.Sprintf("capabilities[%d]", i)}
 			if item.Source != nil {
 				*source = *item.Source
@@ -453,12 +528,39 @@ func preserveGroups(contributions []Contribution, opts MergeOptions) (*MergeResu
 					source.Kit = contribution.Reference
 				}
 			}
+			if item.Group == nil && (item.Type == CapabilityVolume || item.Type == CapabilityHostMount) && !capabilityIsParameterized(item) {
+				// An unrelated deferred request cannot hide a concrete conflict.
+				// Explicit group members stay separate until atomic selection.
+				item.Source = source
+				reference := fmt.Sprintf("%s (%s %s)", contribution.Reference, source.Kit, source.Path)
+				if err := storage.add(reference, item); err != nil {
+					return nil, err
+				}
+				key, err := storage.instanceKey(reference, item)
+				if err != nil {
+					return nil, err
+				}
+				merged := storage.byKey[key].capability
+				merged.Optional = storage.optional[key]
+				if position, seen := storagePositions[key]; seen {
+					merged.DeclarationBlocks = append(append([]string(nil), result.Descriptor.Capabilities[position].DeclarationBlocks...), item.DeclarationBlocks...)
+					result.Descriptor.Capabilities[position] = merged
+				} else {
+					storagePositions[key] = len(result.Descriptor.Capabilities)
+					result.Descriptor.Capabilities = append(result.Descriptor.Capabilities, merged)
+				}
+				// Keeping these entries ordinary lets an enclosing set also
+				// reconcile them without crossing an explicit group boundary.
+				continue
+			}
 			if item.Group == nil {
 				member := item
 				member.Optional = false
 				member.optionalSet = false
 				member.Source = source
-				item = Capability{Group: &CapabilityGroup{Name: item.Name, Description: item.Description, Optional: item.Optional, Capabilities: []Capability{member}}, Source: source}
+				member.DeclarationBlocks = nil
+				member.declarationBlocksSet = false
+				item = Capability{DeclarationBlocks: item.DeclarationBlocks, Group: &CapabilityGroup{Name: item.Name, Description: item.Description, Optional: item.Optional, Capabilities: []Capability{member}}, Source: source}
 			} else {
 				g := *item.Group
 				g.Capabilities = append([]Capability(nil), g.Capabilities...)

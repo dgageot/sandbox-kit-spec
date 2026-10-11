@@ -19,6 +19,13 @@ func groupHook(text string) Capability {
 func TestGroupGrammar(t *testing.T) {
 	for _, item := range []string{
 		"group: {}",
+		"declarationBlocks: null\ngroup: {capabilities: [{type: com.example/member@1}]}",
+		"declarationBlocks: [12]\ngroup: {capabilities: [{type: com.example/member@1}]}",
+		"declarationBlocks: [null]\ngroup: {capabilities: [{type: com.example/member@1}]}",
+		"declarationBlocks: ['']\ngroup: {capabilities: [{type: com.example/member@1}]}",
+		"declarationBlocks: [same, same]\ngroup: {capabilities: [{type: com.example/member@1}]}",
+		"declarationBlocks: [same]\ngroup: {capabilities: [{type: com.example/member@1}, {type: com.example/other@1}]}",
+		"group: {capabilities: [{type: com.example/member@1, declarationBlocks: []}]}",
 		"group: {capabilities: []}",
 		"group: null",
 		"type: com.example/feature@1\ngroup: {capabilities: [{type: com.example/member@1}]}",
@@ -216,6 +223,44 @@ func TestSelectedCompositionAndPublishedOrder(t *testing.T) {
 			require.Equal(t, want, got)
 			require.Len(t, got.Startup, 2+map[bool]int{true: 1}[accept], "identical hooks are not deduplicated")
 		})
+	}
+}
+
+func TestConcreteStorageMergePreservesGroupSelection(t *testing.T) {
+	volume := func(size string) Capability {
+		return Capability{Type: CapabilityVolume, Config: map[string]any{"path": "/cache", "size": size}}
+	}
+	inputs := []Contribution{
+		{Reference: "a", Descriptor: &Descriptor{SchemaVersion: SchemaVersion, Kind: KindMixin, Capabilities: []Capability{volume("1g")}}},
+		{Reference: "b", Descriptor: &Descriptor{SchemaVersion: SchemaVersion, Kind: KindMixin, Capabilities: []Capability{
+			{Group: &CapabilityGroup{Optional: true, Capabilities: []Capability{{Type: "com.example/feature@1"}, volume("2g")}}},
+			volume("1024m"),
+		}}},
+	}
+	merged, err := Merge(inputs, MergeOptions{})
+	require.NoError(t, err, "a conditional conflict waits for group selection")
+	require.Len(t, merged.Descriptor.Capabilities, 2, "only ungrouped matching storage collapses")
+	require.Len(t, merged.Descriptor.Capabilities[1].Group.Capabilities, 2, "the explicit group remains intact")
+	raw, err := json.Marshal(merged.Descriptor)
+	require.NoError(t, err)
+	_, err = ValidatePublished(raw, merged.Descriptor)
+	require.NoError(t, err)
+	for _, accept := range []bool{false, true} {
+		selected, err := SelectCapabilities(t.Context(), merged.Descriptor, func(_ context.Context, _ Descriptor, c Capability) CapabilityDecision {
+			return CapabilityDecision{Accepted: accept || c.Type != "com.example/feature@1"}
+		})
+		require.NoError(t, err)
+		d := *merged.Descriptor
+		d.Capabilities = selected.Capabilities
+		composed, err := Compose([]Contribution{{Reference: "set", Descriptor: &d}})
+		if accept {
+			require.ErrorContains(t, err, "different com.docker.sandbox/volume@1 configurations at /cache")
+			continue
+		}
+		require.NoError(t, err)
+		volumes, err := VolumesOf(composed.Capabilities)
+		require.NoError(t, err)
+		require.Equal(t, []Volume{{Path: "/cache", Size: "1g"}}, volumes)
 	}
 }
 
@@ -533,4 +578,22 @@ func TestSelectionDecisionDefaultsAndSupported(t *testing.T) {
 	decision := selector(t.Context(), *d, Capability{Type: CapabilityVolume})
 	require.False(t, decision.Accepted)
 	require.Contains(t, decision.Message, CapabilityVolume)
+}
+
+func TestEffectiveCapabilitiesOmitDeclarationBlocks(t *testing.T) {
+	d := &Descriptor{SchemaVersion: SchemaVersion, Kind: KindMixin,
+		Capabilities: []Capability{{Type: CapabilityVolume, DeclarationBlocks: []string{"original"}, Config: map[string]any{"path": "/cache"}}}}
+	raw, err := json.Marshal(d)
+	require.NoError(t, err)
+	_, err = ValidateExpandedDeclarations(raw, d)
+	require.NoError(t, err)
+	_, err = ValidateEffective(raw, d)
+	require.ErrorContains(t, err, "unselected declaration blocks")
+	selected, err := SelectCapabilities(t.Context(), d, Supported(CapabilityVolume))
+	require.NoError(t, err)
+	d.Capabilities = selected.Capabilities
+	raw, err = json.Marshal(d)
+	require.NoError(t, err)
+	_, err = ValidateEffective(raw, d)
+	require.NoError(t, err)
 }
