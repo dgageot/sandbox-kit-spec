@@ -181,6 +181,15 @@ capabilities:
           - {domain: api.x.ai, header: Authorization, format: "Bearer %s"}
   - type: com.docker.sandbox/lifecycle@1
     config:
+      install:
+        # The skills mount lands at ~/.config/opencode/skills, and the
+        # runtime creates the missing parents for it as root. opencode.json
+        # lives beside the mount, so hand both parents back to the agent
+        # before the startup merge below tries to write there. Not -R: the
+        # skills mount itself is read-only.
+        - command: mkdir -p /home/agent/.config/opencode && chown agent:agent /home/agent/.config /home/agent/.config/opencode
+          user: "0"
+          description: Ensure ~/.config/opencode is owned by agent
       startup:
         # Gateway-first MCP registration, merged with jq rather than
         # overwritten: startup runs on every boot, and opencode.json is
