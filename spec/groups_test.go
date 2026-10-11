@@ -19,6 +19,13 @@ func groupHook(text string) Capability {
 func TestGroupGrammar(t *testing.T) {
 	for _, item := range []string{
 		"group: {}",
+		"declarationBlocks: null\ngroup: {capabilities: [{type: com.example/member@1}]}",
+		"declarationBlocks: [12]\ngroup: {capabilities: [{type: com.example/member@1}]}",
+		"declarationBlocks: [null]\ngroup: {capabilities: [{type: com.example/member@1}]}",
+		"declarationBlocks: ['']\ngroup: {capabilities: [{type: com.example/member@1}]}",
+		"declarationBlocks: [same, same]\ngroup: {capabilities: [{type: com.example/member@1}]}",
+		"declarationBlocks: [same]\ngroup: {capabilities: [{type: com.example/member@1}, {type: com.example/other@1}]}",
+		"group: {capabilities: [{type: com.example/member@1, declarationBlocks: []}]}",
 		"group: {capabilities: []}",
 		"group: null",
 		"type: com.example/feature@1\ngroup: {capabilities: [{type: com.example/member@1}]}",
@@ -571,4 +578,22 @@ func TestSelectionDecisionDefaultsAndSupported(t *testing.T) {
 	decision := selector(t.Context(), *d, Capability{Type: CapabilityVolume})
 	require.False(t, decision.Accepted)
 	require.Contains(t, decision.Message, CapabilityVolume)
+}
+
+func TestEffectiveCapabilitiesOmitDeclarationBlocks(t *testing.T) {
+	d := &Descriptor{SchemaVersion: SchemaVersion, Kind: KindMixin,
+		Capabilities: []Capability{{Type: CapabilityVolume, DeclarationBlocks: []string{"original"}, Config: map[string]any{"path": "/cache"}}}}
+	raw, err := json.Marshal(d)
+	require.NoError(t, err)
+	_, err = ValidateExpandedDeclarations(raw, d)
+	require.NoError(t, err)
+	_, err = ValidateEffective(raw, d)
+	require.ErrorContains(t, err, "unselected declaration blocks")
+	selected, err := SelectCapabilities(t.Context(), d, Supported(CapabilityVolume))
+	require.NoError(t, err)
+	d.Capabilities = selected.Capabilities
+	raw, err = json.Marshal(d)
+	require.NoError(t, err)
+	_, err = ValidateEffective(raw, d)
+	require.NoError(t, err)
 }

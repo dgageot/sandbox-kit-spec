@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"testing"
@@ -769,5 +770,147 @@ func TestSetReExportRejectsLiteralStorageCollisions(t *testing.T) {
 				require.Error(t, err, "re-export cannot turn an invalid declaration block into independently reconcilable requests")
 			})
 		}
+	}
+}
+
+func TestSetReExportRetainsStorageDeclarationBlocks(t *testing.T) {
+	for _, tc := range []struct {
+		name, firstType, secondType, secondPath string
+	}{
+		{"two argument paths", spec.CapabilityVolume, spec.CapabilityVolume, "${{ kit.args.second }}"},
+		{"literal and argument path", spec.CapabilityVolume, spec.CapabilityVolume, "/cache/./"},
+		{"environment and argument path", spec.CapabilityVolume, spec.CapabilityVolume, "${{ kit.env.CACHE }}"},
+		{"host mount duplicates", spec.CapabilityHostMount, spec.CapabilityHostMount, "${{ kit.args.second }}"},
+		{"host and private collision", spec.CapabilityHostMount, spec.CapabilityVolume, "${{ kit.args.second }}"},
+		{"private and host collision", spec.CapabilityVolume, spec.CapabilityHostMount, "${{ kit.args.second }}"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			args := map[string]spec.Arg{"first": {Required: true}, "second": {Required: true}}
+			input := &spec.Descriptor{SchemaVersion: spec.SchemaVersion, Kind: spec.KindMixin, Args: args,
+				Capabilities: []spec.Capability{
+					{Type: tc.firstType, Optional: true, Config: map[string]any{"path": "${{ kit.args.first }}"},
+						Source: &spec.CapabilitySource{Kit: "diagnostic-one", Path: "capabilities[7]"}},
+					{Type: tc.secondType, Optional: true, Config: map[string]any{"path": tc.secondPath},
+						Source: &spec.CapabilitySource{Kit: "diagnostic-two", Path: "capabilities[8]"}},
+				}}
+			declarations, _, err := kitDeclarations(input, spec.Kit{Args: map[string]string{
+				"first": "${{ kit.args.first }}", "second": "${{ kit.args.second }}",
+			}}, args)
+			require.NoError(t, err)
+			merged, err := spec.Merge([]spec.Contribution{{Reference: "cache-kit", Descriptor: declarations}}, spec.MergeOptions{})
+			require.NoError(t, err)
+			for depth := range 3 {
+				merged.Descriptor.Args = args
+				raw, err := publishedSetDescriptor(merged.Descriptor)
+				require.NoError(t, err)
+				// Exercise the actual published JSON, including a nested set.
+				roundTrip, err := spec.Decode(raw)
+				require.NoError(t, err)
+				for _, collide := range []bool{false, true} {
+					first := "/other"
+					if collide {
+						first = "/cache"
+					}
+					second := "/data/../cache"
+					if tc.secondType == spec.CapabilityHostMount {
+						second = "/cache"
+					}
+					expanded, err := spec.ExpandCreateArgs(raw, args, map[string]string{"first": first, "second": second})
+					require.NoError(t, err)
+					d, err := spec.Decode(expanded)
+					require.NoError(t, err)
+					d, err = spec.ExpandEnvironment(d, map[string]string{"CACHE": "/cache/"})
+					require.NoError(t, err)
+					expanded, err = json.Marshal(d)
+					require.NoError(t, err)
+					_, err = spec.ValidateExpandedDeclarations(expanded, d)
+					if !collide {
+						require.NoError(t, err, "depth %d: distinct requests remain valid", depth)
+						selected, err := spec.SelectCapabilities(t.Context(), d, func(_ context.Context, _ spec.Descriptor, c spec.Capability) spec.CapabilityDecision {
+							return spec.CapabilityDecision{Accepted: c.Config["path"] != "/other"}
+						})
+						require.NoError(t, err)
+						require.Len(t, selected.Capabilities, 1, "optional declarations still select independently")
+						continue
+					}
+					require.Error(t, err, "depth %d: publication must retain same-block collisions", depth)
+					_, err = spec.SelectCapabilities(t.Context(), d, func(context.Context, spec.Descriptor, spec.Capability) spec.CapabilityDecision {
+						t.Fatal("invalid expanded declarations must fail before even a rejecting selector runs")
+						return spec.CapabilityDecision{}
+					})
+					require.Error(t, err)
+				}
+				merged, err = spec.Merge([]spec.Contribution{{Reference: "nested-set", Descriptor: roundTrip}}, spec.MergeOptions{})
+				require.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestSetReExportScopesBlocksToContributionOccurrences(t *testing.T) {
+	args := map[string]spec.Arg{"path": {Required: true}}
+	input := &spec.Descriptor{SchemaVersion: spec.SchemaVersion, Kind: spec.KindMixin, Args: args,
+		Capabilities: []spec.Capability{{Type: spec.CapabilityVolume, Config: map[string]any{"path": "${{ kit.args.path }}"}}}}
+	for depth := range 3 {
+		merged, err := spec.Merge([]spec.Contribution{
+			{Reference: "same-reference", Descriptor: input},
+			{Reference: "same-reference", Descriptor: input},
+		}, spec.MergeOptions{})
+		require.NoError(t, err)
+		merged.Descriptor.Args = args
+		raw, err := publishedSetDescriptor(merged.Descriptor)
+		require.NoError(t, err)
+		expanded, err := spec.ExpandCreateArgs(raw, args, map[string]string{"path": "/cache"})
+		require.NoError(t, err)
+		d, err := spec.Decode(expanded)
+		require.NoError(t, err)
+		_, err = spec.ValidateExpandedDeclarations(expanded, d)
+		require.NoError(t, err, "depth %d: separate occurrences remain separate declaration blocks", depth)
+		selected, err := spec.SelectCapabilities(t.Context(), d, spec.Supported(spec.CapabilityVolume))
+		require.NoError(t, err)
+		d.Capabilities = selected.Capabilities
+		composed, err := spec.Compose([]spec.Contribution{{Reference: "set", Descriptor: d}})
+		require.NoError(t, err)
+		require.Len(t, composed.Capabilities, 1)
+		require.Empty(t, composed.Capabilities[0].DeclarationBlocks)
+		input, err = spec.Decode(raw)
+		require.NoError(t, err)
+	}
+}
+
+func TestSetReExportRetainsEveryConcreteStorageBlock(t *testing.T) {
+	args := map[string]spec.Arg{"first": {Required: true}, "second": {Required: true}}
+	var contributions []spec.Contribution
+	for _, arg := range []string{"first", "second"} {
+		contributions = append(contributions, spec.Contribution{Reference: arg, Descriptor: &spec.Descriptor{
+			SchemaVersion: spec.SchemaVersion, Kind: spec.KindMixin, Args: args,
+			Capabilities: []spec.Capability{
+				{Type: spec.CapabilityVolume, Config: map[string]any{"path": "${{ kit.args." + arg + " }}"}},
+				{Type: spec.CapabilityVolume, Config: map[string]any{"path": "/cache"}},
+			},
+		}})
+	}
+	merged, err := spec.Merge(contributions, spec.MergeOptions{})
+	require.NoError(t, err)
+	merged.Descriptor.Args = args
+	for depth := range 2 {
+		merged.Descriptor.Args = args
+		raw, err := publishedSetDescriptor(merged.Descriptor)
+		require.NoError(t, err)
+		require.Len(t, merged.Descriptor.Capabilities[1].DeclarationBlocks, 2, "collapsed concrete request belongs to both original blocks")
+		for _, collision := range []string{"first", "second"} {
+			values := map[string]string{"first": "/one", "second": "/two"}
+			values[collision] = "/cache/"
+			expanded, err := spec.ExpandCreateArgs(raw, args, values)
+			require.NoError(t, err)
+			d, err := spec.Decode(expanded)
+			require.NoError(t, err)
+			_, err = spec.ValidateExpandedDeclarations(expanded, d)
+			require.Error(t, err, "depth %d: concrete reconciliation must retain the %s block", depth, collision)
+		}
+		d, err := spec.Decode(raw)
+		require.NoError(t, err)
+		merged, err = spec.Merge([]spec.Contribution{{Reference: "nested", Descriptor: d}}, spec.MergeOptions{})
+		require.NoError(t, err)
 	}
 }

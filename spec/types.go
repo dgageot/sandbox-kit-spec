@@ -256,11 +256,17 @@ type Capability struct {
 	// type and must be selected before typed accessors are used.
 	Group *CapabilityGroup `json:"group,omitempty" yaml:"group,omitempty"`
 
+	// DeclarationBlocks preserves duplicate-validation boundaries when a
+	// publisher splits ordinary entries into independently selected groups.
+	// IDs are local to this descriptor; they do not identify trusted sources.
+	DeclarationBlocks []string `json:"declarationBlocks,omitempty" yaml:"declarationBlocks,omitempty"`
+
 	// Source preserves publisher attribution. It is untrusted diagnostic
 	// metadata; the consuming artifact still determines trust.
-	Source      *CapabilitySource `json:"source,omitempty" yaml:"source,omitempty"`
-	optionalSet bool
-	groupSet    bool
+	Source               *CapabilitySource `json:"source,omitempty" yaml:"source,omitempty"`
+	optionalSet          bool
+	groupSet             bool
+	declarationBlocksSet bool
 
 	// Type names the capability and its contract version, e.g.
 	// "com.docker.sandbox/network-policy@1".
@@ -311,9 +317,20 @@ func (c *Capability) UnmarshalYAML(unmarshal func(any) error) error {
 	if name, ok := keys["name"]; ok && name.ShortTag() != "!!str" {
 		return fmt.Errorf("capability name must be a string")
 	}
+	if blocks, ok := keys["declarationBlocks"]; ok {
+		if blocks.ShortTag() != "!!seq" {
+			return fmt.Errorf("declarationBlocks must be an array of strings")
+		}
+		for _, id := range blocks.Content {
+			if id.ShortTag() != "!!str" {
+				return fmt.Errorf("declarationBlocks must contain strings")
+			}
+		}
+	}
 	_, c.configSet = keys["config"]
 	_, c.optionalSet = keys["optional"]
 	_, c.groupSet = keys["group"]
+	_, c.declarationBlocksSet = keys["declarationBlocks"]
 	if _, stated := keys["source"]; stated && c.Source == nil {
 		return fmt.Errorf("capability source must be an object")
 	}
@@ -344,9 +361,24 @@ func (c *Capability) UnmarshalJSON(data []byte) error {
 	if name, ok := keys["name"]; ok && bytes.Equal(bytes.TrimSpace(name), []byte("null")) {
 		return fmt.Errorf("capability name must be a string")
 	}
+	if blocks, ok := keys["declarationBlocks"]; ok {
+		if bytes.Equal(bytes.TrimSpace(blocks), []byte("null")) {
+			return fmt.Errorf("declarationBlocks must be an array of strings")
+		}
+		var ids []json.RawMessage
+		if err := json.Unmarshal(blocks, &ids); err != nil {
+			return err
+		}
+		for _, id := range ids {
+			if bytes.Equal(bytes.TrimSpace(id), []byte("null")) {
+				return fmt.Errorf("declarationBlocks must contain strings")
+			}
+		}
+	}
 	_, c.configSet = keys["config"]
 	_, c.optionalSet = keys["optional"]
 	_, c.groupSet = keys["group"]
+	_, c.declarationBlocksSet = keys["declarationBlocks"]
 	if _, stated := keys["source"]; stated && c.Source == nil {
 		return fmt.Errorf("capability source must be an object")
 	}

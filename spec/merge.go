@@ -131,6 +131,7 @@ func Compose(contributions []Contribution) (*Descriptor, error) {
 	// the input declarations and diagnostics, not on the effective request.
 	for i := range result.Descriptor.Capabilities {
 		result.Descriptor.Capabilities[i].Source = nil
+		result.Descriptor.Capabilities[i].DeclarationBlocks = nil
 	}
 	return result.Descriptor, nil
 }

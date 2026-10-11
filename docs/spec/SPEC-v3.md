@@ -535,6 +535,7 @@ capabilities:
 | `config` | map | Type-specific request payload. Strictly decoded for well-known types (unknown config keys are errors); carried opaquely for unknown types. |
 | `description` | string | optional. |
 | `source` | object | optional diagnostic provenance: original `kit` and field `path`; not a trust input. |
+| `declarationBlocks` | string array | optional descriptor-local block IDs for validation across split declarations; see [§7.1.1](#711-capability-groups). Not permitted on group members. |
 
 A capability's `name` labels the request; `description` explains it.
 Neither is an identifier. The name is separate from names inside config,
@@ -630,8 +631,18 @@ capabilities:
 The grammar MUST reject mixed ordinary/group items, empty or nested <!-- tck: SPEC-v3 §7.1.1/group-grammar -->
 groups, and member-level `optional`, even as false.
 The group's `optional` defaults to false. Required and one-member groups
-are valid. Singleton and duplicate constraints apply separately to the
-ordinary top-level entries and to each group's members.
+are valid. Without retained `declarationBlocks`, singleton and duplicate
+constraints apply separately to the ordinary top-level entries and to
+each group's members.
+
+An ordinary item or one-member group can carry `declarationBlocks`, an
+array of nonempty, distinct descriptor-local IDs. Items sharing an ID
+also form one original declaration block for singleton and duplicate
+validation, before selection and after expansion. The IDs do not couple
+selection: each item keeps its own optionality. Group members cannot
+state this field. A concrete request reconciled from several blocks
+carries every contributing ID. IDs are structural constraints, separate
+from diagnostic `source` attribution; they grant no authority.
 
 All declarations MUST validate before selection, including skipped <!-- tck: SPEC-v3 §7.1.1/validate-declarations -->
 groups and every member.
@@ -681,9 +692,14 @@ Publishing MUST preserve conditional boundaries, relative declaration <!-- tck: 
 order, referenced content, and source attribution. Publishing does not
 select against build-host availability. A publisher may represent an
 ordinary contribution as a one-member group with the same optionality
-to preserve its position beside conditional contributions. An item's
-optional `source` object records its original `kit` and field `path`;
-this is diagnostic metadata, never an authority or permission input.
+to preserve its position beside conditional contributions. When doing
+so, `declarationBlocks` preserves the original ordinary block across its
+independent groups and any reconciled concrete entries. Publishers scope
+these IDs to each contribution occurrence and remap them when nesting
+sets, so identical references do not combine independent blocks.
+An item's optional `source` object records its original `kit` and field
+`path`; this is diagnostic metadata, never an authority or permission
+input.
 The consumer's actual artifact reference remains the source of trust.
 
 Selection records and composition diagnostics MUST retain original <!-- tck: SPEC-v3 §7.1.1/provenance -->
@@ -968,7 +984,8 @@ that policy refuses a change to retained storage settings.
 A volume request with re-exported text inputs remains a separate
 contribution until create-phase expansion and selection. Publication
 preserves its optionality and source attribution through a one-member
-group ([§7.1.1](#711-capability-groups)); runtime composition then
+group, and its original declaration boundary through `declarationBlocks`
+([§7.1.1](#711-capability-groups)); runtime composition then
 compares concrete configurations. An unresolved reference is not evidence
 of a configuration conflict.
 

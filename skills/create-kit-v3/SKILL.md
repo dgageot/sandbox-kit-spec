@@ -432,6 +432,14 @@ composition conflict is an error rather than a reason to skip another
 group. Singleton arity is per declaration block; lifecycle lists from
 selected blocks concatenate, and duplicate file paths are errors.
 
+Published sets may carry `declarationBlocks` on ordinary items or
+one-member group wrappers. Preserve these descriptor-local IDs when
+reading a published descriptor: they keep duplicate checks within an
+original block after expansion, without coupling optional selection.
+A publisher remaps them per contribution occurrence, retains all IDs on
+reconciled concrete requests, and never derives them from diagnostic
+`source` metadata. Hand-authored Kits normally omit this field.
+
 Selection lasts for one sandbox installation, including restarts.
 Recreation selects afresh. A failing selected hook is an execution
 failure, not optional unavailability. Skipping a group does not remove
