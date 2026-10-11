@@ -264,6 +264,18 @@ capabilities:
       continue: ["--continue"]
       resume: ["--session", "{{.SessionID}}"]
 
+  # opencode speaks ACP itself, so the adapter is the agent binary. It
+  # reads the same opencode.json the TUI does and starts sessions in the
+  # same `build` mode, with `plan` offered as the stricter session mode.
+  # session/new returns the native ses_… id that `--session` resumes, and
+  # stdin EOF and SIGTERM each end the process well inside five seconds.
+  - type: com.docker.sandbox/acp@1
+    optional: true
+    description: Drive opencode sessions over the Agent Client Protocol
+    config:
+      agent: opencode
+      command: [opencode, acp]
+
   # Where opencode reads shared skills, so the host's store reaches it.
   # The runtime also exposes selected agent-skill@1 bundles here, even
   # when host sharing is off or the user has no host skills.

@@ -8,6 +8,12 @@ FROM dhi.io/sbx-templates:cursor-agent-docker
 # cursor from validating a file-backed sentinel and re-prompting login;
 # auth bootstraps through the environment when host OAuth creds exist.
 ENV IS_SANDBOX=1 AGENT_CLI_CREDENTIAL_STORE=memory
+# The ACP launcher acp@1 names: cursor-agent's ACP server keeps running
+# after stdin closes, so the wrapper follows the close with SIGTERM, which
+# it does stop on.
+USER root
+COPY scripts/acp-graceful.mjs /usr/local/bin/acp-graceful
+RUN chmod 0755 /usr/local/bin/acp-graceful
 USER agent
 WORKDIR /home/agent/workspace
 # v2's sandbox.entrypoint.

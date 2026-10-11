@@ -114,6 +114,20 @@ capabilities:
       continue: ["--resume", "latest"]
       resume: ["--resume", "{{.SessionID}}"]
 
+  # gemini speaks ACP itself (--acp). --yolo carries the entrypoint's
+  # posture into ACP sessions, which start in the `yolo` mode and offer
+  # default, autoEdit and plan as stricter ones; that holds only because
+  # the settings seed above disables folder trust, without which gemini
+  # downgrades yolo to default. gemini stops on stdin EOF but ignores
+  # SIGTERM in ACP mode, so acp-graceful (see the dockerfile) closes its
+  # stdin on SIGTERM instead.
+  - type: com.docker.sandbox/acp@1
+    optional: true
+    description: Drive gemini sessions over the Agent Client Protocol
+    config:
+      agent: gemini
+      command: [acp-graceful, gemini, --acp, --yolo]
+
   # gemini reads its profile as GEMINI.md, not AGENTS.md.
   - type: com.docker.sandbox/agent-context@1
     config:
