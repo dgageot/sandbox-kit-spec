@@ -11,7 +11,8 @@ Host tools must attach it to a non-TTY stdin/stdout stream, for example
 server whose command runs that.
 
 The adapter drives the same `claude` binary this sandbox already has
-(`CLAUDE_CODE_EXECUTABLE=/usr/local/bin/claude`), so authentication is
+(the one `command -v claude` finds, unless `CLAUDE_CODE_EXECUTABLE`
+names another), so authentication is
 the surface `claude` uses: the proxy-mediated Anthropic credential in
 `~/.claude/.credentials.json` and `~/.claude/settings.json`. If `claude`
 works here, the adapter works with no extra setup and nothing separate to

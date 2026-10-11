@@ -38,13 +38,10 @@ kits:
   # adapter below contributes none of that because it drives this
   # kit's claude rather than talking to Anthropic itself.
   #
-  # The mixin rather than the claude workload kit, and not
-  # interchangeably: the adapter resolves the CLI through
-  # CLAUDE_CODE_EXECUTABLE=/usr/local/bin/claude, which is where this
-  # kit installs it. The workload's own install lands under
-  # $HOME/.local/bin, and the adapter ships with its vendored fallback
-  # binary omitted on purpose, so that pairing resolves and builds and
-  # then finds no agent at run time.
+  # The mixin rather than the claude workload kit because the shell kit
+  # above is already the workload. The adapter would find either one's
+  # claude: its wrapper resolves the binary on PATH, so the workload's
+  # $HOME/.local/bin install works as well as this kit's /usr/local/bin.
   - ref: ${{ kit.args.registry }}/sbx-kit-claude-mixin:2.1.285
 
   # The ACP adapter. Its requires: ["claude"] is answered by the kit
