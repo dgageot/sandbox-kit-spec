@@ -3,6 +3,7 @@ package fetch
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"testing"
 
 	"github.com/docker/sandbox-kit-spec/v3/spec"
@@ -64,12 +65,12 @@ func TestSelectionTargetsAndExpandedDescriptorsThroughPublicAPIs(t *testing.T) {
 			var result *Resolved
 			switch method {
 			case "Resolve":
-				result, err = client.Resolve(t.Context(), requests, WithCapabilitySelector(selector))
+				result, err = client.Resolve(t.Context(), requests, WithCapabilitySelector(selector), WithExpandedDescriptors())
 			case "ResolvePartial":
-				result, err = client.ResolvePartial(t.Context(), requests[1:], WithCapabilitySelector(selector))
+				result, err = client.ResolvePartial(t.Context(), requests[1:], WithCapabilitySelector(selector), WithExpandedDescriptors())
 			case "Assemble":
 				var assembled *Result
-				assembled, err = Assemble(t.Context(), requests, Options{Loader: client.LoadKit, CapabilitySelector: selector})
+				assembled, err = Assemble(t.Context(), requests, Options{Loader: client.LoadKit, CapabilitySelector: selector, RetainExpandedDescriptors: true})
 				if err == nil {
 					result = assembled.Resolved
 				}
@@ -107,4 +108,114 @@ func TestSelectionTargetsAndExpandedDescriptorsThroughPublicAPIs(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestExpandedDescriptorCaptureDoesNotSerializeSkippedSecrets(t *testing.T) {
+	for _, method := range []string{"Resolve", "ResolvePartial", "Assemble"} {
+		for _, capture := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/capture=%t", method, capture), func(t *testing.T) {
+				d := &spec.Descriptor{SchemaVersion: spec.SchemaVersion, Kind: spec.KindWorkload,
+					Capabilities: []spec.Capability{{Type: "com.example/secret@1", Optional: true,
+						Config: map[string]any{"value": "${{ kit.env.SECRET }}"}}}}
+				secret := "sensitive-skipped-value"
+				result := resolveSelectionFixture(t, method, d, capture, map[string]string{"SECRET": secret},
+					func(context.Context, spec.SelectionTarget, spec.Descriptor, spec.Capability) spec.CapabilityDecision {
+						return spec.CapabilityDecision{}
+					})
+				selection := result.Selections[0]
+				require.Empty(t, result.Descriptor.Capabilities)
+				require.Len(t, selection.Selection.Skipped, 1)
+				if capture {
+					require.NotNil(t, selection.ExpandedDescriptor)
+					require.Equal(t, secret, selection.ExpandedDescriptor.Capabilities[0].Config["value"])
+				} else {
+					require.Nil(t, selection.ExpandedDescriptor)
+				}
+				raw, err := json.Marshal(result.Selections)
+				require.NoError(t, err)
+				require.NotContains(t, string(raw), secret)
+				require.NotContains(t, string(raw), "ExpandedDescriptor")
+			})
+		}
+	}
+}
+
+func TestExpandedDescriptorCaptureIsIsolated(t *testing.T) {
+	for _, method := range []string{"Resolve", "ResolvePartial", "Assemble"} {
+		t.Run(method, func(t *testing.T) {
+			entry := func(typ string) spec.Capability {
+				return spec.Capability{Type: typ, Source: &spec.CapabilitySource{Kit: "original", Path: "capabilities[7]"},
+					Config: map[string]any{"values": []any{map[string]any{"value": "original"}}}}
+			}
+			d := &spec.Descriptor{SchemaVersion: spec.SchemaVersion, Kind: spec.KindWorkload, Licenses: []string{"MIT"},
+				Capabilities: []spec.Capability{entry("com.example/ordinary@1"),
+					{Group: &spec.CapabilityGroup{Optional: true, Capabilities: []spec.Capability{entry("com.example/grouped@1")}}}}}
+			result := resolveSelectionFixture(t, method, d, true, nil,
+				func(_ context.Context, _ spec.SelectionTarget, owner spec.Descriptor, c spec.Capability) spec.CapabilityDecision {
+					c.Config["values"].([]any)[0].(map[string]any)["value"] = "selector"
+					c.Source.Kit = "selector"
+					owner.Licenses[0] = "Apache-2.0"
+					return spec.CapabilityDecision{Accepted: true}
+				})
+			snapshot := result.Selections[0].ExpandedDescriptor
+			require.NotNil(t, snapshot)
+			require.Equal(t, []string{"MIT"}, snapshot.Licenses)
+			captured := spec.DeclaredCapabilities(snapshot.Capabilities)
+			effective := result.Kits[0].Descriptor.Capabilities
+			require.Len(t, captured, 2)
+			require.Len(t, effective, 2)
+			for i, c := range captured {
+				values := c.Config["values"].([]any)
+				require.Equal(t, "original", values[0].(map[string]any)["value"])
+				require.Equal(t, "original", c.Source.Kit)
+				effective[i].Config["values"].([]any)[0].(map[string]any)["value"] = "effective"
+				require.Equal(t, "original", values[0].(map[string]any)["value"])
+				values[0].(map[string]any)["value"] = "snapshot"
+				c.Source.Kit = "snapshot"
+				require.Equal(t, "effective", effective[i].Config["values"].([]any)[0].(map[string]any)["value"])
+				require.Equal(t, "selector", effective[i].Source.Kit)
+			}
+		})
+	}
+}
+
+func resolveSelectionFixture(t *testing.T, method string, d *spec.Descriptor, capture bool, environment map[string]string, selector spec.SelectCapability) *Resolved {
+	t.Helper()
+	if method == "ResolvePartial" {
+		d.Kind = spec.KindMixin
+	}
+	reg := newRegistry(t)
+	input, _ := assemblyFixture(t, d.Kind, "selection", "selection")
+	input.Manifest.Annotations[spec.AnnotationDescriptor] = string(kitJSON(t, d))
+	manifest, err := json.Marshal(input.Manifest)
+	require.NoError(t, err)
+	config, err := json.Marshal(input.Config)
+	require.NoError(t, err)
+	reg.blobs["kit/blobs/"+input.Manifest.Config.Digest.String()] = config
+	reg.tag("kit", "test", manifest)
+	client, err := New()
+	require.NoError(t, err)
+	requests := reqs(reg.ref("kit", "test"))
+	options := []ResolveOption{WithCapabilitySelector(selector), WithEnvironment(nil, environment)}
+	if capture {
+		options = append(options, WithExpandedDescriptors())
+	}
+	var result *Resolved
+	switch method {
+	case "Resolve":
+		result, err = client.Resolve(t.Context(), requests, options...)
+	case "ResolvePartial":
+		result, err = client.ResolvePartial(t.Context(), requests, options...)
+	case "Assemble":
+		var assembled *Result
+		assembled, err = Assemble(t.Context(), requests, Options{Loader: client.LoadKit, CapabilitySelector: selector,
+			RetainExpandedDescriptors: capture, Overrides: Overrides{Env: environment}})
+		if err == nil {
+			result = assembled.Resolved
+		}
+	default:
+		t.Fatalf("unknown resolution API %q", method)
+	}
+	require.NoError(t, err)
+	return result
 }

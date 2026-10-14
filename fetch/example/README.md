@@ -111,8 +111,8 @@ allowance.
 The program prints the result plus its computed manifest:
 
 - `Resolved`: the selected `Descriptor`, dependency-ordered per-Kit
-  `Kits` with their `Env` exports, published and expanded descriptors and
-  decisions in `Selections`, argument `ContainerEnv` exports, and
+  `Kits` with their `Env` exports, published descriptors and decisions in
+  `Selections`, argument `ContainerEnv` exports, and
   validation `Warnings`.
 - `Image`: typed OCI `Config` and ordered `Layers`. The workload's
   layers come first, followed by mixins in dependency order.
@@ -222,10 +222,15 @@ takes the consumption reference:
 `spec.SelectCapabilities(ctx, reference, descriptor, selector)`.
 An empty reference is permitted for standalone descriptors without one.
 
-`KitSelection.ExpandedDescriptor` retains all expanded declarations before
-selection, including skipped members, with original publisher attribution.
-Use it for validation and admission evidence; effective grants still come
-from `Resolved.Kits` or `Resolved.Descriptor`.
+`KitSelection.ExpandedDescriptor` is nil by default. Opt into independent
+copies before selection with `Options.RetainExpandedDescriptors: true` for
+`Assemble`, or `fetch.WithExpandedDescriptors()` for `Resolve` and
+`ResolvePartial`. Copies include skipped members and original publisher
+attribution, and stay isolated from selector and effective-result mutations.
+Expanded environment values can contain secrets. JSON serialization always
+excludes the copies; callers control their storage and disclosure. Use them
+for validation and admission evidence; effective grants still come from
+`Resolved.Kits` or `Resolved.Descriptor`.
 
 `KitSelection.Original` is now `PublishedDescriptor` and retains the
 published argument declarations and unexpanded references.
@@ -271,8 +276,10 @@ multiple Kits with the same value.
 `KitSelection.PublishedDescriptor` retains the published descriptor,
 including its argument declarations and unexpanded references.
 `KitSelection.PublishedBytes` holds its exact source bytes.
-`KitSelection.ExpandedDescriptor` retains every expanded declaration
-before selection and source-label completion. Apply the
+`KitSelection.ExpandedDescriptor`, when explicitly requested, retains every
+expanded declaration before selection and source-label completion. It is
+excluded from JSON serialization because expanded values may be secrets.
+Apply the
 expanded, selected declarations from `Resolved.Kits` or
 `Resolved.Descriptor`.
 

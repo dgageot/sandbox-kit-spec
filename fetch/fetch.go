@@ -212,11 +212,13 @@ type KitSelection struct {
 	// declarations.
 	PublishedDescriptor *spec.Descriptor
 
-	// ExpandedDescriptor is the descriptor after argument and final-container
+	// ExpandedDescriptor is an independent copy after argument and final-container
 	// environment expansion, before selection or source-label completion. It
-	// retains every declaration, including skipped groups and ordinary entries,
-	// and the publisher's original source attribution.
-	ExpandedDescriptor *spec.Descriptor
+	// includes skipped declarations and original publisher attribution. Nil unless
+	// WithExpandedDescriptors or Options.RetainExpandedDescriptors enables capture.
+	// Expanded values may be secrets; JSON excludes this field even when captured.
+	// Callers control any storage or disclosure of the captured descriptor.
+	ExpandedDescriptor *spec.Descriptor `json:"-"`
 
 	// PublishedBytes holds the exact published descriptor bytes, preserving
 	// source formatting for diagnostics and persistence.
@@ -228,9 +230,18 @@ type KitSelection struct {
 // ResolveOption configures create-time descriptor selection.
 type ResolveOption func(*resolveOptions)
 type resolveOptions struct {
-	selector     spec.SelectCapability
-	environment  map[string]string
-	envOverrides map[string]string
+	selector                  spec.SelectCapability
+	environment               map[string]string
+	envOverrides              map[string]string
+	retainExpandedDescriptors bool
+}
+
+// WithExpandedDescriptors opts into capturing an independent expanded descriptor
+// for every Kit, before selection. Skipped declarations can contain secrets from
+// the final container environment. Capture is off by default and excluded from
+// KitSelection's JSON; callers control any storage or disclosure of these values.
+func WithExpandedDescriptors() ResolveOption {
+	return func(o *resolveOptions) { o.retainExpandedDescriptors = true }
 }
 
 // WithCapabilitySelector lets a runtime decide each expanded request. The
@@ -396,6 +407,20 @@ func mergeKits(ctx context.Context, kits []*Kit, args []map[string]string, parti
 	contributions := make([]spec.Contribution, 0, len(ordered))
 	for i, u := range ordered {
 		published := publishedByReference[u.Reference]
+		var snapshot *spec.Descriptor
+		if options.retainExpandedDescriptors {
+			// Copy before callbacks can mutate nested maps shared with effective
+			// grants. Decode from serialized declarations to copy every field.
+			raw, err := json.Marshal(u.Descriptor)
+			if err != nil {
+				return nil, fmt.Errorf("%s: copy expanded descriptor", u.Reference)
+			}
+			snapshot, err = spec.Decode(raw)
+			if err != nil {
+				// Decoder details could include expanded environment secrets.
+				return nil, fmt.Errorf("%s: copy expanded descriptor", u.Reference)
+			}
+		}
 		selected, err := spec.SelectCapabilities(ctx, u.Reference, withSelectionSources(u.Descriptor, u.Reference), options.selector)
 		if err != nil {
 			return nil, spec.WithSource(err, u.Reference, published.Raw)
@@ -403,7 +428,7 @@ func mergeKits(ctx context.Context, kits []*Kit, args []map[string]string, parti
 		selections = append(selections, KitSelection{
 			Reference:           u.Reference,
 			PublishedDescriptor: published.Descriptor,
-			ExpandedDescriptor:  u.Descriptor,
+			ExpandedDescriptor:  snapshot,
 			PublishedBytes:      published.Raw,
 			Selection:           selected,
 		})

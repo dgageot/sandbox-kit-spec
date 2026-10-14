@@ -713,11 +713,15 @@ The consumer's actual artifact reference remains the source of trust.
 Selection records and composition diagnostics MUST retain original <!-- tck: SPEC-v3 §7.1.1/provenance -->
 item/member locations and source Kits; labels alone are not identities.
 The resolution APIs return selected per-Kit declarations separately
-from original declarations and selection records. They also return each
-Kit's expanded descriptor before selection, including skipped declarations
-and the publisher's original source attribution. Image assembly does not
-select again or omit Kit layers. Argument environment exports are
-independent of selection.
+from original declarations and selection records. Callers can opt into
+capturing each Kit's expanded descriptor before selection, including
+skipped declarations and the publisher's original source attribution.
+The capture is an independent copy made before the selector runs.
+Expanded values can contain secrets, so capture defaults to off and is
+excluded from ordinary JSON serialization of selection results. Callers
+that capture these values control their storage and disclosure. Image
+assembly does not select again or omit Kit layers. Argument environment
+exports are independent of selection.
 
 The runtime MUST retain selection and skip records for the sandbox's <!-- tck: SPEC-v3 §7.1.1/lifetime -->
 lifetime, use the same selection on restart, and select afresh only on

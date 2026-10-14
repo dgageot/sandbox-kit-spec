@@ -35,9 +35,11 @@
 // and required-rejection diagnostics.
 // The default selector accepts this library's known types; runtimes should
 // supply their actual claims with spec.Supported or a stricter callback.
-// Resolved.Selections retains published descriptors, their original bytes,
-// expanded descriptors before selection and source-label completion, and
-// create-time decisions.
+// Resolved.Selections retains published descriptors, their original bytes, and
+// create-time decisions. WithExpandedDescriptors (or Options.RetainExpandedDescriptors
+// for Assemble) opts into independent expanded copies before selection and
+// source-label completion. These may contain secrets, including in skipped
+// declarations, and are excluded from JSON; callers control their storage.
 // Resolved.Kits retains only selected contributions, pinned image identities,
 // resolved arguments, and each Kit's Env exports in dependency order.
 // Resolved.ContainerEnv contains their conflict-checked union for container
