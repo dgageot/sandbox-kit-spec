@@ -79,10 +79,10 @@ func TestHostMountStorageConflicts(t *testing.T) {
 
 func TestHostMountSelectionAndExpansion(t *testing.T) {
 	d := hostMountDescriptor(map[string]any{"path": "/cache"})
-	_, err := SelectCapabilities(t.Context(), d, Supported(CapabilityVolume))
+	_, err := SelectCapabilities(t.Context(), "test-kit", d, Supported(CapabilityVolume))
 	require.Error(t, err, "support for private volumes cannot satisfy host sharing")
 	d.Capabilities[0].Optional = true
-	selection, err := SelectCapabilities(t.Context(), d, Supported(CapabilityVolume))
+	selection, err := SelectCapabilities(t.Context(), "test-kit", d, Supported(CapabilityVolume))
 	require.NoError(t, err)
 	require.Empty(t, selection.Capabilities)
 	require.Len(t, selection.Skipped, 1)
@@ -93,17 +93,17 @@ func TestHostMountSelectionAndExpansion(t *testing.T) {
 	}}}}
 	d, err = ExpandEnvironment(d, map[string]string{"HOME": "/home/agent"})
 	require.NoError(t, err)
-	selection, err = SelectCapabilities(t.Context(), d, Supported(CapabilityHostMount, CapabilityLifecycle))
+	selection, err = SelectCapabilities(t.Context(), "test-kit", d, Supported(CapabilityHostMount, CapabilityLifecycle))
 	require.NoError(t, err)
 	mounts, err := HostMountsOf(selection.Capabilities)
 	require.NoError(t, err)
 	require.Equal(t, "/home/agent/.cache/pip", mounts[0].Path)
-	selection, err = SelectCapabilities(t.Context(), d, Supported(CapabilityLifecycle))
+	selection, err = SelectCapabilities(t.Context(), "test-kit", d, Supported(CapabilityLifecycle))
 	require.NoError(t, err)
 	require.Empty(t, selection.Capabilities, "a skipped sharing group contributes no hooks")
 
 	d.Capabilities[0].Group.Capabilities[0].Config["path"] = "relative"
-	_, err = SelectCapabilities(t.Context(), d, Supported(CapabilityLifecycle))
+	_, err = SelectCapabilities(t.Context(), "test-kit", d, Supported(CapabilityLifecycle))
 	require.Error(t, err, "unsupported optional groups still validate")
 }
 
@@ -130,7 +130,7 @@ func TestHostMountConflictDependsOnSelectedGroups(t *testing.T) {
 		{Type: CapabilityVolume, Config: map[string]any{"path": "/cache"}},
 	}}})
 	for _, supported := range [][]string{{CapabilityHostMount}, {CapabilityHostMount, CapabilityVolume}} {
-		selection, err := SelectCapabilities(t.Context(), d, Supported(supported...))
+		selection, err := SelectCapabilities(t.Context(), "test-kit", d, Supported(supported...))
 		require.NoError(t, err)
 		selected := *d
 		selected.Capabilities = selection.Capabilities

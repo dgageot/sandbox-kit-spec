@@ -55,11 +55,14 @@ if err != nil {
 types the library knows, without reading or validating layers. That
 default is not a claim that a runtime implements every type: supply its
 actual supported types or a policy callback. A callback has signature
-`func(context.Context, spec.Descriptor, spec.Capability) spec.CapabilityDecision`.
-It receives the operation context and the owning Kit's expanded
+`func(context.Context, spec.SelectionTarget, spec.Descriptor, spec.Capability) spec.CapabilityDecision`.
+It receives the operation context, a target, and the owning Kit's expanded
 descriptor, including `DisplayName` and all declarations before
-selection. Descriptor and capability inputs are passed by value. Use the
-context for cancellable policy or approval calls. Return
+selection. The target contains the caller's consumption `Reference` and
+the declaration's `Path` before selection or flattening. Publisher
+`source` attribution does not change it. Target, descriptor, and
+capability inputs are passed by value. Use the context for cancellable
+policy or approval calls. Return
 `spec.CapabilityDecision{Accepted: true}` to accept, or
 `spec.CapabilityDecision{Message: "reason"}` to reject. The zero value
 rejects. Selection records retain each member's `Accepted` and `Message`
@@ -108,9 +111,9 @@ allowance.
 The program prints the result plus its computed manifest:
 
 - `Resolved`: the selected `Descriptor`, dependency-ordered per-Kit
-  `Kits` with their `Env` exports, published descriptors and decisions
-  in `Selections`, argument `ContainerEnv` exports, and validation
-  `Warnings`.
+  `Kits` with their `Env` exports, published descriptors and decisions in
+  `Selections`, argument `ContainerEnv` exports, and
+  validation `Warnings`.
 - `Image`: typed OCI `Config` and ordered `Layers`. The workload's
   layers come first, followed by mixins in dependency order.
 - `Environment`: the complete container environment, combining image
@@ -212,6 +215,23 @@ assembly. Progress callbacks, when supplied, run synchronously.
 
 ## Migrating existing callers
 
+`spec.SelectCapability` now receives a `spec.SelectionTarget` after the
+context parameter. Update custom callbacks and calls to selectors
+returned by `spec.Supported` to pass it through. Direct selection now
+takes the consumption reference:
+`spec.SelectCapabilities(ctx, reference, descriptor, selector)`.
+An empty reference is permitted for standalone descriptors without one.
+
+`KitSelection.ExpandedDescriptor` is nil by default. Opt into independent
+copies before selection with `Options.RetainExpandedDescriptors: true` for
+`Assemble`, or `fetch.WithExpandedDescriptors()` for `Resolve` and
+`ResolvePartial`. Copies include skipped members and original publisher
+attribution, and stay isolated from selector and effective-result mutations.
+Expanded environment values can contain secrets. JSON serialization always
+excludes the copies; callers control their storage and disclosure. Use them
+for validation and admission evidence; effective grants still come from
+`Resolved.Kits` or `Resolved.Descriptor`.
+
 `KitSelection.Original` is now `PublishedDescriptor` and retains the
 published argument declarations and unexpanded references.
 `KitSelection.Raw` is now `PublishedBytes`. Use `Resolved.Kits` for
@@ -255,7 +275,11 @@ multiple Kits with the same value.
 
 `KitSelection.PublishedDescriptor` retains the published descriptor,
 including its argument declarations and unexpanded references.
-`KitSelection.PublishedBytes` holds its exact source bytes. Apply the
+`KitSelection.PublishedBytes` holds its exact source bytes.
+`KitSelection.ExpandedDescriptor`, when explicitly requested, retains every
+expanded declaration before selection and source-label completion. It is
+excluded from JSON serialization because expanded values may be secrets.
+Apply the
 expanded, selected declarations from `Resolved.Kits` or
 `Resolved.Descriptor`.
 

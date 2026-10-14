@@ -36,6 +36,10 @@ func TestAssembleLoaderImagePreservesConsumptionIdentity(t *testing.T) {
 					return input, nil
 				},
 				LayerValidator: DefaultLayerValidator,
+				CapabilitySelector: func(_ context.Context, target spec.SelectionTarget, _ spec.Descriptor, _ spec.Capability) spec.CapabilityDecision {
+					require.Equal(t, spec.SelectionTarget{Reference: tc.reference, Path: "capabilities[0]"}, target)
+					return spec.CapabilityDecision{Accepted: true}
+				},
 			})
 			require.NoError(t, err)
 			require.Len(t, result.Resolved.Kits, 1)

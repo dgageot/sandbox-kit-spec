@@ -212,6 +212,14 @@ type KitSelection struct {
 	// declarations.
 	PublishedDescriptor *spec.Descriptor
 
+	// ExpandedDescriptor is an independent copy after argument and final-container
+	// environment expansion, before selection or source-label completion. It
+	// includes skipped declarations and original publisher attribution. Nil unless
+	// WithExpandedDescriptors or Options.RetainExpandedDescriptors enables capture.
+	// Expanded values may be secrets; JSON excludes this field even when captured.
+	// Callers control any storage or disclosure of the captured descriptor.
+	ExpandedDescriptor *spec.Descriptor `json:"-"`
+
 	// PublishedBytes holds the exact published descriptor bytes, preserving
 	// source formatting for diagnostics and persistence.
 	PublishedBytes []byte
@@ -222,14 +230,24 @@ type KitSelection struct {
 // ResolveOption configures create-time descriptor selection.
 type ResolveOption func(*resolveOptions)
 type resolveOptions struct {
-	selector     spec.SelectCapability
-	environment  map[string]string
-	envOverrides map[string]string
+	selector                  spec.SelectCapability
+	environment               map[string]string
+	envOverrides              map[string]string
+	retainExpandedDescriptors bool
+}
+
+// WithExpandedDescriptors opts into capturing an independent expanded descriptor
+// for every Kit, before selection. Skipped declarations can contain secrets from
+// the final container environment. Capture is off by default and excluded from
+// KitSelection's JSON; callers control any storage or disclosure of these values.
+func WithExpandedDescriptors() ResolveOption {
+	return func(o *resolveOptions) { o.retainExpandedDescriptors = true }
 }
 
 // WithCapabilitySelector lets a runtime decide each expanded request. The
-// callback receives the operation context and the owning Kit's expanded
-// descriptor, including DisplayName and all declarations. Descriptor and
+// callback receives the operation context, the consumption reference and
+// declaration path in a SelectionTarget, and the owning Kit's expanded
+// descriptor, including DisplayName and all declarations. Target, descriptor, and
 // capability inputs are passed by value. The library retains atomic groups,
 // ordering, validation, and source records.
 // Decision messages are recorded for each member and included in required
@@ -389,13 +407,19 @@ func mergeKits(ctx context.Context, kits []*Kit, args []map[string]string, parti
 	contributions := make([]spec.Contribution, 0, len(ordered))
 	for i, u := range ordered {
 		published := publishedByReference[u.Reference]
-		selected, err := spec.SelectCapabilities(ctx, withSelectionSources(u.Descriptor, u.Reference), options.selector)
+		var snapshot *spec.Descriptor
+		if options.retainExpandedDescriptors {
+			// Copy before callbacks can mutate data shared with effective grants.
+			snapshot = cloneExpandedDescriptor(u.Descriptor)
+		}
+		selected, err := spec.SelectCapabilities(ctx, u.Reference, withSelectionSources(u.Descriptor, u.Reference), options.selector)
 		if err != nil {
 			return nil, spec.WithSource(err, u.Reference, published.Raw)
 		}
 		selections = append(selections, KitSelection{
 			Reference:           u.Reference,
 			PublishedDescriptor: published.Descriptor,
+			ExpandedDescriptor:  snapshot,
 			PublishedBytes:      published.Raw,
 			Selection:           selected,
 		})

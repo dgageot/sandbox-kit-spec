@@ -19,14 +19,20 @@ import (
 // the built-in layer integrity, extraction, and collision checks.
 type Options struct {
 	Loader KitLoader
-	// CapabilitySelector receives the operation context, expanded owning Kit
+	// CapabilitySelector receives the operation context, a SelectionTarget with
+	// the consumption reference and declaration path, and the expanded owning Kit
 	// descriptor (including DisplayName), and capability. It decides availability
-	// and policy without applying effects. Descriptor and capability inputs are
+	// and policy without applying effects. Target, descriptor, and capability inputs are
 	// passed by value.
 	// Nil accepts KnownCapabilities; a runtime with fewer implementations supplies
 	// spec.Supported with its actual claims. Groups remain atomic.
 	CapabilitySelector spec.SelectCapability
-	Overrides          Overrides
+	// RetainExpandedDescriptors opts into independent pre-selection snapshots in
+	// Resolved.Selections. They include skipped declarations and may contain
+	// secrets from the final environment. Default false; excluded from JSON even
+	// when captured. The caller controls their storage and disclosure.
+	RetainExpandedDescriptors bool
+	Overrides                 Overrides
 	// LayerValidator checks the complete set after metadata composition and
 	// descriptor resolution. Nil skips layer checks without calling LayerLoader;
 	// the caller is responsible for integrity, safe extraction, resource limits,
@@ -154,7 +160,11 @@ func Assemble(ctx context.Context, requests []Request, options Options) (*Result
 			selector = spec.Supported(spec.KnownCapabilities()...)
 		}
 		var err error
-		resolved, err = mergeKits(ctx, kits, args, false, WithCapabilitySelector(selector), WithEnvironment(environment, options.Overrides.Env))
+		resolveOptions := []ResolveOption{WithCapabilitySelector(selector), WithEnvironment(environment, options.Overrides.Env)}
+		if options.RetainExpandedDescriptors {
+			resolveOptions = append(resolveOptions, WithExpandedDescriptors())
+		}
+		resolved, err = mergeKits(ctx, kits, args, false, resolveOptions...)
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}

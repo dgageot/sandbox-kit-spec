@@ -96,7 +96,7 @@ func TestResolveWithEnvironment(t *testing.T) {
 					}
 					calls := 0
 					for range 2 { // Reusing an option cannot retain mutations from a previous result.
-						result, err := resolve(t.Context(), requests, option, WithCapabilitySelector(func(_ context.Context, _ spec.Descriptor, c spec.Capability) spec.CapabilityDecision {
+						result, err := resolve(t.Context(), requests, option, WithCapabilitySelector(func(_ context.Context, _ spec.SelectionTarget, _ spec.Descriptor, c spec.Capability) spec.CapabilityDecision {
 							lc, err := spec.LifecycleOf([]spec.Capability{c})
 							require.NoError(t, err)
 							require.Equal(t, tc.wantHome+"/config", lc.Files[0].Path)
@@ -143,7 +143,7 @@ func TestResolveRejectsMalformedInsertedPlaceholders(t *testing.T) {
 				}
 				result, err := client.ResolvePartial(t.Context(), requests,
 					WithEnvironment(map[string]string{"VALUE": secret}, nil),
-					WithCapabilitySelector(func(context.Context, spec.Descriptor, spec.Capability) spec.CapabilityDecision {
+					WithCapabilitySelector(func(context.Context, spec.SelectionTarget, spec.Descriptor, spec.Capability) spec.CapabilityDecision {
 						t.Fatal("invalid inserted value reached selector")
 						return spec.CapabilityDecision{Accepted: true}
 					}))
@@ -191,7 +191,7 @@ func TestResolveRejectsEnvironmentReferencesIntroducedByArguments(t *testing.T) 
 				kit := &Kit{Reference: "example.com/tool:1.0.0", Digest: digest.FromBytes(raw).String(), Descriptor: d, Raw: raw}
 				result, err := mergeKits(t.Context(), []*Kit{kit}, []map[string]string{supplied}, true,
 					WithEnvironment(map[string]string{"SECRET": "private-environment-value", "PUBLIC": "public"}, nil),
-					WithCapabilitySelector(func(context.Context, spec.Descriptor, spec.Capability) spec.CapabilityDecision {
+					WithCapabilitySelector(func(context.Context, spec.SelectionTarget, spec.Descriptor, spec.Capability) spec.CapabilityDecision {
 						t.Fatal("introduced reference reached selection")
 						return spec.CapabilityDecision{Accepted: true}
 					}))
@@ -233,7 +233,7 @@ func TestResolveInvalidEnvironmentGroupKeepsMemberLocation(t *testing.T) {
 	for _, accept := range []bool{false, true} {
 		_, err := mergeKits(t.Context(), []*Kit{kit}, []map[string]string{nil}, true,
 			WithEnvironment(map[string]string{"PATH": "private-relative-path"}, nil),
-			WithCapabilitySelector(func(context.Context, spec.Descriptor, spec.Capability) spec.CapabilityDecision {
+			WithCapabilitySelector(func(context.Context, spec.SelectionTarget, spec.Descriptor, spec.Capability) spec.CapabilityDecision {
 				t.Fatal("invalid group reached selection")
 				return spec.CapabilityDecision{Accepted: accept}
 			}))

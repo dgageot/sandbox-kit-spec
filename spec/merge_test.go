@@ -667,7 +667,7 @@ capabilities:
         - type: com.docker.sandbox/lifecycle@1
           config: {interactive: [--tui], startup: [{command: echo ready}]}
 `)
-			selected, err := SelectCapabilities(t.Context(), d, Supported(CapabilityAgentInteractiveSessions, CapabilityLifecycle))
+			selected, err := SelectCapabilities(t.Context(), "test-kit", d, Supported(CapabilityAgentInteractiveSessions, CapabilityLifecycle))
 			require.NoError(t, err)
 			effective := *d
 			effective.Capabilities = selected.Capabilities

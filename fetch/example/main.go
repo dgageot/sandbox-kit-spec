@@ -29,8 +29,8 @@ func main() {
 		claimed[i] = strings.TrimSpace(claimed[i])
 	}
 	supported := spec.Supported(claimed...)
-	selectCapability := func(ctx context.Context, kit spec.Descriptor, capability spec.Capability) spec.CapabilityDecision {
-		if decision := supported(ctx, kit, capability); !decision.Accepted {
+	selectCapability := func(ctx context.Context, target spec.SelectionTarget, kit spec.Descriptor, capability spec.Capability) spec.CapabilityDecision {
+		if decision := supported(ctx, target, kit, capability); !decision.Accepted {
 			return decision
 		}
 		// A real runtime uses host availability and policy here. The full
