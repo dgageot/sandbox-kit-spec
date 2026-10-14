@@ -187,7 +187,7 @@ func TestACPComposition(t *testing.T) {
 		base.Descriptor.Capabilities[0],
 		{Group: &CapabilityGroup{Optional: true, Capabilities: []Capability{acpEntry("claude", []string{"conflicting"})}}},
 	}}
-	selected, err := SelectCapabilities(t.Context(), grouped, Supported(CapabilityACP))
+	selected, err := SelectCapabilities(t.Context(), "test-kit", grouped, Supported(CapabilityACP))
 	require.NoError(t, err)
 	grouped.Capabilities = selected.Capabilities
 	_, err = Compose([]Contribution{{Reference: "selected", Descriptor: grouped}})
@@ -239,7 +239,7 @@ func TestACPExamples(t *testing.T) {
 				others = append(others, c.Type)
 			}
 		}
-		selected, err := SelectCapabilities(t.Context(), d, Supported(others...))
+		selected, err := SelectCapabilities(t.Context(), "test-kit", d, Supported(others...))
 		require.NoError(t, err, "a host without ACP keeps the kit usable")
 		require.False(t, HasCapability(selected.Capabilities, CapabilityACP))
 	}

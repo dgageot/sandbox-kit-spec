@@ -34,7 +34,7 @@ func TestResolveGroupsThroughPublicAPIs(t *testing.T) {
 				method = client.ResolvePartial
 			}
 			calls := 0
-			result, err := method(t.Context(), reqs(reg.ref("kits/groups", "1.0.0")), WithCapabilitySelector(func(_ context.Context, _ spec.Descriptor, c spec.Capability) spec.CapabilityDecision {
+			result, err := method(t.Context(), reqs(reg.ref("kits/groups", "1.0.0")), WithCapabilitySelector(func(_ context.Context, _ spec.SelectionTarget, _ spec.Descriptor, c spec.Capability) spec.CapabilityDecision {
 				calls++
 				if c.Type != spec.CapabilityPort {
 					return spec.CapabilityDecision{Accepted: true}
@@ -81,12 +81,12 @@ func TestSelectionPrecedesCredentialOwnershipAndCrossChecks(t *testing.T) {
 	result, err := client.Resolve(t.Context(), requests)
 	require.NoError(t, err)
 	require.Len(t, result.Kits[1].Descriptor.Capabilities, 0)
-	_, err = client.Resolve(t.Context(), requests, WithCapabilitySelector(func(context.Context, spec.Descriptor, spec.Capability) spec.CapabilityDecision {
+	_, err = client.Resolve(t.Context(), requests, WithCapabilitySelector(func(context.Context, spec.SelectionTarget, spec.Descriptor, spec.Capability) spec.CapabilityDecision {
 		return spec.CapabilityDecision{Accepted: true}
 	}))
 	require.ErrorContains(t, err, "one credential has one owner")
 	require.ErrorContains(t, err, "group.capabilities[1]")
-	_, err = client.Resolve(t.Context(), requests, WithCapabilitySelector(func(_ context.Context, _ spec.Descriptor, c spec.Capability) spec.CapabilityDecision {
+	_, err = client.Resolve(t.Context(), requests, WithCapabilitySelector(func(_ context.Context, _ spec.SelectionTarget, _ spec.Descriptor, c spec.Capability) spec.CapabilityDecision {
 		return spec.CapabilityDecision{Accepted: c.Type != spec.CapabilityNetworkPolicy}
 	}))
 	require.ErrorContains(t, err, "required capability selection rejected")
@@ -94,7 +94,7 @@ func TestSelectionPrecedesCredentialOwnershipAndCrossChecks(t *testing.T) {
 	// rather than silently leave a credential injectable outside its allowlist.
 	base.Capabilities[1].Optional = true
 	reg.tag("kits/base", "2.0.0", reg.image(t, kitJSON(t, base)))
-	_, err = client.Resolve(t.Context(), reqs(reg.ref("kits/base", "2.0.0")), WithCapabilitySelector(func(_ context.Context, _ spec.Descriptor, c spec.Capability) spec.CapabilityDecision {
+	_, err = client.Resolve(t.Context(), reqs(reg.ref("kits/base", "2.0.0")), WithCapabilitySelector(func(_ context.Context, _ spec.SelectionTarget, _ spec.Descriptor, c spec.Capability) spec.CapabilityDecision {
 		return spec.CapabilityDecision{Accepted: c.Type != spec.CapabilityNetworkPolicy}
 	}))
 	require.ErrorContains(t, err, "not in the network policy")
@@ -106,7 +106,7 @@ func TestResolveValidatesSkippedMembersAfterExpansion(t *testing.T) {
 	reg.tag("kits/group", "1.0.0", reg.image(t, kitJSON(t, d)))
 	client, err := New()
 	require.NoError(t, err)
-	_, err = client.ResolvePartial(t.Context(), []Request{{Reference: reg.ref("kits/group", "1.0.0"), Args: map[string]string{"port": "70000"}}}, WithCapabilitySelector(func(context.Context, spec.Descriptor, spec.Capability) spec.CapabilityDecision {
+	_, err = client.ResolvePartial(t.Context(), []Request{{Reference: reg.ref("kits/group", "1.0.0"), Args: map[string]string{"port": "70000"}}}, WithCapabilitySelector(func(context.Context, spec.SelectionTarget, spec.Descriptor, spec.Capability) spec.CapabilityDecision {
 		t.Fatal("invalid member reached selection")
 		return spec.CapabilityDecision{Accepted: false}
 	}))
@@ -160,7 +160,7 @@ func TestResolveCompletesSelectionSourcesWithoutMutatingDeclarations(t *testing.
 					client, err := New()
 					require.NoError(t, err)
 					ref := reg.ref("kits/source", "1.0.0")
-					result, err := client.ResolvePartial(t.Context(), reqs(ref), WithCapabilitySelector(func(context.Context, spec.Descriptor, spec.Capability) spec.CapabilityDecision {
+					result, err := client.ResolvePartial(t.Context(), reqs(ref), WithCapabilitySelector(func(context.Context, spec.SelectionTarget, spec.Descriptor, spec.Capability) spec.CapabilityDecision {
 						return spec.CapabilityDecision{Accepted: accept}
 					}))
 					require.NoError(t, err)
@@ -197,7 +197,7 @@ func TestRequiredRejectionCompletesPathOnlySources(t *testing.T) {
 			client, err := New()
 			require.NoError(t, err)
 			ref := reg.ref("kits/source", "1.0.0")
-			_, err = client.ResolvePartial(t.Context(), reqs(ref), WithCapabilitySelector(func(context.Context, spec.Descriptor, spec.Capability) spec.CapabilityDecision {
+			_, err = client.ResolvePartial(t.Context(), reqs(ref), WithCapabilitySelector(func(context.Context, spec.SelectionTarget, spec.Descriptor, spec.Capability) spec.CapabilityDecision {
 				return spec.CapabilityDecision{Message: "storage unavailable"}
 			}))
 			require.ErrorContains(t, err, "original source "+ref+" capabilities[7]")
@@ -245,7 +245,7 @@ func TestResolveSelectorReceivesOwningKit(t *testing.T) {
 			}
 			seen := map[string]string{}
 			result, err := method(ctx, requests, WithEnvironment(map[string]string{"HOME": "/home/agent"}, nil),
-				WithCapabilitySelector(func(callCtx context.Context, kit spec.Descriptor, c spec.Capability) spec.CapabilityDecision {
+				WithCapabilitySelector(func(callCtx context.Context, _ spec.SelectionTarget, kit spec.Descriptor, c spec.Capability) spec.CapabilityDecision {
 					require.Same(t, ctx, callCtx)
 					require.Len(t, kit.Capabilities, 1, "descriptor belongs to this Kit, before composition")
 					require.Equal(t, c, kit.Capabilities[0])

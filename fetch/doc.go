@@ -27,14 +27,17 @@
 // same checks while allowing a mixin-only set. There is no validation bypass.
 //
 // WithCapabilitySelector supplies runtime decisions over expanded entries.
-// Callbacks receive the operation context, the owning Kit's expanded descriptor
-// (including DisplayName), and the capability, both passed by value.
+// Callbacks receive the operation context, a SelectionTarget with the consumption
+// reference and declaration path, the owning Kit's expanded descriptor (including
+// DisplayName), and the capability. Target, descriptor, and capability are passed
+// by value; publisher-provided source attribution does not change the target.
 // They return a spec.CapabilityDecision; messages survive in selection records
 // and required-rejection diagnostics.
 // The default selector accepts this library's known types; runtimes should
 // supply their actual claims with spec.Supported or a stricter callback.
 // Resolved.Selections retains published descriptors, their original bytes,
-// and create-time decisions.
+// expanded descriptors before selection and source-label completion, and
+// create-time decisions.
 // Resolved.Kits retains only selected contributions, pinned image identities,
 // resolved arguments, and each Kit's Env exports in dependency order.
 // Resolved.ContainerEnv contains their conflict-checked union for container

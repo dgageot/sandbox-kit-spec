@@ -19,9 +19,10 @@ import (
 // the built-in layer integrity, extraction, and collision checks.
 type Options struct {
 	Loader KitLoader
-	// CapabilitySelector receives the operation context, expanded owning Kit
+	// CapabilitySelector receives the operation context, a SelectionTarget with
+	// the consumption reference and declaration path, and the expanded owning Kit
 	// descriptor (including DisplayName), and capability. It decides availability
-	// and policy without applying effects. Descriptor and capability inputs are
+	// and policy without applying effects. Target, descriptor, and capability inputs are
 	// passed by value.
 	// Nil accepts KnownCapabilities; a runtime with fewer implementations supplies
 	// spec.Supported with its actual claims. Groups remain atomic.

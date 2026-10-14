@@ -489,7 +489,7 @@ kits:
 	}
 	for _, accept := range []bool{false, true} {
 		calls := 0
-		resolved, err := client.Resolve(t.Context(), []fetch.Request{{Reference: ref}}, fetch.WithCapabilitySelector(func(_ context.Context, _ spec.Descriptor, c spec.Capability) spec.CapabilityDecision {
+		resolved, err := client.Resolve(t.Context(), []fetch.Request{{Reference: ref}}, fetch.WithCapabilitySelector(func(_ context.Context, _ spec.SelectionTarget, _ spec.Descriptor, c spec.Capability) spec.CapabilityDecision {
 			calls++
 			return spec.CapabilityDecision{Accepted: accept || c.Type != "com.example/feature@1"}
 		}))

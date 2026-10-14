@@ -106,13 +106,28 @@ func (s *CapabilitySource) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// SelectionTarget identifies a member in the consumed descriptor, independently
+// of publisher-provided CapabilitySource attribution and selection outcomes.
+// It is not serialized into the descriptor or taken from publisher metadata.
+type SelectionTarget struct {
+	// Reference is supplied to SelectCapabilities by the caller. Fetch APIs use
+	// the consumption reference, not a resolved digest or built image reference.
+	Reference string
+	// Path is the zero-based declaration path before selection or flattening,
+	// matching SelectionRecord.Members: capabilities[i] for an ordinary entry,
+	// or capabilities[i].group.capabilities[j] for a group member.
+	Path string
+}
+
 // SelectCapability answers whether the runtime will provide one expanded entry.
+// The target identifies that member without depending on callback order or
+// shared descriptor storage. Capability.Source remains diagnostic metadata.
 // The descriptor is the owning Kit after argument and environment expansion,
-// including its DisplayName and all declarations before selection. Descriptor
-// and capability inputs are passed by value. The context carries cancellation
-// and deadlines.
+// including its DisplayName and all declarations before selection. Target,
+// descriptor, and capability inputs are passed by value. The context carries
+// cancellation and deadlines.
 // It must not apply the entry: the enclosing group can still be rejected.
-type SelectCapability func(context.Context, Descriptor, Capability) CapabilityDecision
+type SelectCapability func(context.Context, SelectionTarget, Descriptor, Capability) CapabilityDecision
 
 // CapabilityDecision is the runtime's answer for one expanded entry.
 // Its zero value rejects the entry. Message explains acceptance or rejection
@@ -128,7 +143,7 @@ func Supported(types ...string) SelectCapability {
 	for _, typ := range types {
 		claimed[typ] = true
 	}
-	return func(_ context.Context, _ Descriptor, c Capability) CapabilityDecision {
+	return func(_ context.Context, _ SelectionTarget, _ Descriptor, c Capability) CapabilityDecision {
 		if claimed[c.Type] {
 			return CapabilityDecision{Accepted: true}
 		}
@@ -360,10 +375,12 @@ func ValidateExpandedDeclarations(raw []byte, d *Descriptor) ([]string, error) {
 
 // SelectCapabilities validates declarations in their actual descriptor context
 // before calling the selector and flattens only wholly selected constructs.
+// Reference is the caller's consumption identity, passed unchanged in each
+// SelectionTarget. It may be empty for standalone descriptors without a reference.
 // A nil descriptor or selector is an error, never an implicit default.
 // Required rejection returns records alongside the error for diagnostics.
 // Cancellation returns a zero selection and the context error.
-func SelectCapabilities(ctx context.Context, d *Descriptor, selectCapability SelectCapability) (Selection, error) {
+func SelectCapabilities(ctx context.Context, reference string, d *Descriptor, selectCapability SelectCapability) (Selection, error) {
 	var result Selection
 	if err := ctx.Err(); err != nil {
 		return result, err
@@ -422,7 +439,7 @@ func SelectCapabilities(ctx context.Context, d *Descriptor, selectCapability Sel
 			if err := ctx.Err(); err != nil {
 				return Selection{}, err
 			}
-			decision := selectCapability(ctx, *d, c)
+			decision := selectCapability(ctx, SelectionTarget{Reference: reference, Path: memberPath}, *d, c)
 			if err := ctx.Err(); err != nil {
 				return Selection{}, err
 			}

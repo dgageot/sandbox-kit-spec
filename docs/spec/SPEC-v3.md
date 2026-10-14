@@ -654,12 +654,20 @@ injection domains, are checked on the selected contributions and merged
 result. Selection does not bypass validation.
 
 The runtime supplies a selection function over expanded ordinary
-entries. The reference implementation passes the operation context and
-the owning Kit's expanded descriptor, including its `displayName` and
-all declarations before selection. The descriptor and capability are
-passed by value. A static list of supported types is sufficient; host
-policy, credential availability, and approval can further constrain the
-answer.
+entries. The reference implementation passes the operation context, a
+`SelectionTarget`, and the owning Kit's expanded descriptor and capability.
+The target's `Reference` is the caller's consumption reference; its `Path`
+locates the member in that consumed descriptor before selection or
+flattening, using `capabilities[i]` or
+`capabilities[i].group.capabilities[j]`. Publisher-provided `source`
+attribution does not change the target. The target's path matches the
+member path in the selection record; resolution supplies the enclosing
+Kit selection's reference. Direct selection takes its reference from the
+caller. Identity does not depend on callback order or shared descriptor
+storage. The descriptor includes its `displayName` and all declarations
+before selection. The target, descriptor, and capability are passed by
+value. A static list of supported types is sufficient; host policy,
+credential availability, and approval can further constrain the answer.
 
 The callback returns a decision with an acceptance flag and an optional
 message. The zero value rejects the entry. Selection records retain
@@ -705,8 +713,10 @@ The consumer's actual artifact reference remains the source of trust.
 Selection records and composition diagnostics MUST retain original <!-- tck: SPEC-v3 §7.1.1/provenance -->
 item/member locations and source Kits; labels alone are not identities.
 The resolution APIs return selected per-Kit declarations separately
-from original declarations and selection records. Image assembly does
-not select again or omit Kit layers. Argument environment exports are
+from original declarations and selection records. They also return each
+Kit's expanded descriptor before selection, including skipped declarations
+and the publisher's original source attribution. Image assembly does not
+select again or omit Kit layers. Argument environment exports are
 independent of selection.
 
 The runtime MUST retain selection and skip records for the sandbox's <!-- tck: SPEC-v3 §7.1.1/lifetime -->

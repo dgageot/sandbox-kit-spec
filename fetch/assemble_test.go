@@ -98,7 +98,7 @@ func TestAssembleGroupsEnvironmentAndImage(t *testing.T) {
 	var decisions []string
 	ctx := t.Context()
 	result, err := Assemble(ctx, fixtureRequests(2), Options{LayerValidator: DefaultLayerValidator, Loader: fixtureLoader(base, mixin), Overrides: Overrides{Env: overrides, WorkingDir: &workdir},
-		CapabilitySelector: func(callCtx context.Context, kit spec.Descriptor, c spec.Capability) spec.CapabilityDecision {
+		CapabilitySelector: func(callCtx context.Context, _ spec.SelectionTarget, kit spec.Descriptor, c spec.Capability) spec.CapabilityDecision {
 			require.Same(t, ctx, callCtx)
 			require.Equal(t, "Tool Kit", kit.DisplayName)
 			require.Len(t, kit.Capabilities[0].Group.Capabilities, 2)
@@ -386,7 +386,7 @@ func TestAssembleValidatesExpandedGroupBeforeSelector(t *testing.T) {
 	})
 	requests := fixtureRequests(1)
 	requests[0].Args = map[string]string{"port": "70000"}
-	_, err := Assemble(t.Context(), requests, Options{LayerValidator: DefaultLayerValidator, Loader: fixtureLoader(input), CapabilitySelector: func(context.Context, spec.Descriptor, spec.Capability) spec.CapabilityDecision {
+	_, err := Assemble(t.Context(), requests, Options{LayerValidator: DefaultLayerValidator, Loader: fixtureLoader(input), CapabilitySelector: func(context.Context, spec.SelectionTarget, spec.Descriptor, spec.Capability) spec.CapabilityDecision {
 		t.Fatal("invalid expanded declaration reached selector")
 		return spec.CapabilityDecision{Accepted: false}
 	}})
@@ -437,7 +437,7 @@ func TestAssembleExpandsFinalEnvironment(t *testing.T) {
 			}
 			calls := 0
 			result, err := Assemble(t.Context(), fixtureRequests(2), Options{LayerValidator: DefaultLayerValidator, Loader: fixtureLoader(base, mixin), Overrides: Overrides{Env: overrides},
-				CapabilitySelector: func(_ context.Context, _ spec.Descriptor, c spec.Capability) spec.CapabilityDecision {
+				CapabilitySelector: func(_ context.Context, _ spec.SelectionTarget, _ spec.Descriptor, c spec.Capability) spec.CapabilityDecision {
 					calls++
 					lc, err := spec.LifecycleOf([]spec.Capability{c})
 					require.NoError(t, err)
@@ -475,7 +475,7 @@ func TestAssembleEnvironmentErrorsBeforeSelection(t *testing.T) {
 				Capabilities: []spec.Capability{{Type: spec.CapabilityVolume, Optional: true, Config: tc.config}},
 			})
 			result, err := Assemble(t.Context(), fixtureRequests(1), Options{LayerValidator: DefaultLayerValidator, Loader: fixtureLoader(base), Overrides: Overrides{Env: tc.env},
-				CapabilitySelector: func(context.Context, spec.Descriptor, spec.Capability) spec.CapabilityDecision {
+				CapabilitySelector: func(context.Context, spec.SelectionTarget, spec.Descriptor, spec.Capability) spec.CapabilityDecision {
 					t.Fatal("selector called before validation")
 					return spec.CapabilityDecision{Accepted: false}
 				},

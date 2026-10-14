@@ -651,7 +651,7 @@ func TestSetReExportsVolumeRequests(t *testing.T) {
 			require.NoError(t, err)
 			_, err = spec.ValidateExpandedDeclarations(expanded, d)
 			require.NoError(t, err)
-			selected, err := spec.SelectCapabilities(t.Context(), d, spec.Supported(spec.CapabilityVolume))
+			selected, err := spec.SelectCapabilities(t.Context(), "test-kit", d, spec.Supported(spec.CapabilityVolume))
 			require.NoError(t, err)
 			d.Capabilities = selected.Capabilities
 			composed, err := spec.Compose([]spec.Contribution{{Reference: "published-set", Descriptor: d}})
@@ -826,7 +826,7 @@ func TestSetReExportRetainsStorageDeclarationBlocks(t *testing.T) {
 					_, err = spec.ValidateExpandedDeclarations(expanded, d)
 					if !collide {
 						require.NoError(t, err, "depth %d: distinct requests remain valid", depth)
-						selected, err := spec.SelectCapabilities(t.Context(), d, func(_ context.Context, _ spec.Descriptor, c spec.Capability) spec.CapabilityDecision {
+						selected, err := spec.SelectCapabilities(t.Context(), "test-kit", d, func(_ context.Context, _ spec.SelectionTarget, _ spec.Descriptor, c spec.Capability) spec.CapabilityDecision {
 							return spec.CapabilityDecision{Accepted: c.Config["path"] != "/other"}
 						})
 						require.NoError(t, err)
@@ -834,7 +834,7 @@ func TestSetReExportRetainsStorageDeclarationBlocks(t *testing.T) {
 						continue
 					}
 					require.Error(t, err, "depth %d: publication must retain same-block collisions", depth)
-					_, err = spec.SelectCapabilities(t.Context(), d, func(context.Context, spec.Descriptor, spec.Capability) spec.CapabilityDecision {
+					_, err = spec.SelectCapabilities(t.Context(), "test-kit", d, func(context.Context, spec.SelectionTarget, spec.Descriptor, spec.Capability) spec.CapabilityDecision {
 						t.Fatal("invalid expanded declarations must fail before even a rejecting selector runs")
 						return spec.CapabilityDecision{}
 					})
@@ -866,7 +866,7 @@ func TestSetReExportScopesBlocksToContributionOccurrences(t *testing.T) {
 		require.NoError(t, err)
 		_, err = spec.ValidateExpandedDeclarations(expanded, d)
 		require.NoError(t, err, "depth %d: separate occurrences remain separate declaration blocks", depth)
-		selected, err := spec.SelectCapabilities(t.Context(), d, spec.Supported(spec.CapabilityVolume))
+		selected, err := spec.SelectCapabilities(t.Context(), "test-kit", d, spec.Supported(spec.CapabilityVolume))
 		require.NoError(t, err)
 		d.Capabilities = selected.Capabilities
 		composed, err := spec.Compose([]spec.Contribution{{Reference: "set", Descriptor: d}})
