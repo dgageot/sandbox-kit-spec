@@ -142,6 +142,47 @@ func TestExpandedDescriptorCaptureDoesNotSerializeSkippedSecrets(t *testing.T) {
 
 func TestExpandedDescriptorCaptureIsIsolated(t *testing.T) {
 	for _, method := range []string{"Resolve", "ResolvePartial", "Assemble"} {
+		for _, tc := range []struct{ name, field string }{
+			{"omitted", ""}, {"empty", `,"config":{}`}, {"null", `,"config":null`},
+		} {
+			t.Run(method+"/config-presence/"+tc.name, func(t *testing.T) {
+				config := tc.field
+				kind := spec.KindWorkload
+				if method == "ResolvePartial" {
+					kind = spec.KindMixin
+				}
+				raw := []byte(fmt.Sprintf(`{"schemaVersion":"3","kind":%q,"capabilities":[
+					{"type":"com.example/ordinary@1","optional":true%s},
+					{"group":{"optional":true,"capabilities":[{"type":"com.example/grouped@1"%s}]}}
+				]}`, kind, config, config))
+				var observed []spec.Capability
+				result := resolveSelectionFixtureRaw(t, method, kind, raw, true, nil,
+					func(_ context.Context, _ spec.SelectionTarget, _ spec.Descriptor, c spec.Capability) spec.CapabilityDecision {
+						require.Equal(t, config != "", c.ConfigStated())
+						if c.Config != nil {
+							c.Config["selector"] = "changed"
+						}
+						observed = append(observed, c)
+						return spec.CapabilityDecision{}
+					})
+				require.Empty(t, result.Descriptor.Capabilities)
+				require.Len(t, result.Selections[0].Selection.Skipped, 2)
+				captured := spec.DeclaredCapabilities(result.Selections[0].ExpandedDescriptor.Capabilities)
+				require.Len(t, captured, 2)
+				require.Len(t, observed, 2)
+				for i, c := range captured {
+					require.Equal(t, config != "", c.ConfigStated())
+					if config == `,"config":{}` {
+						require.NotNil(t, c.Config)
+						require.Empty(t, c.Config)
+						c.Config["snapshot"] = "changed"
+						require.Equal(t, map[string]any{"selector": "changed"}, observed[i].Config)
+					} else {
+						require.Nil(t, c.Config)
+					}
+				}
+			})
+		}
 		t.Run(method, func(t *testing.T) {
 			entry := func(typ string) spec.Capability {
 				return spec.Capability{Type: typ, Source: &spec.CapabilitySource{Kit: "original", Path: "capabilities[7]"},
@@ -184,9 +225,14 @@ func resolveSelectionFixture(t *testing.T, method string, d *spec.Descriptor, ca
 	if method == "ResolvePartial" {
 		d.Kind = spec.KindMixin
 	}
+	return resolveSelectionFixtureRaw(t, method, d.Kind, kitJSON(t, d), capture, environment, selector)
+}
+
+func resolveSelectionFixtureRaw(t *testing.T, method, kind string, raw []byte, capture bool, environment map[string]string, selector spec.SelectCapability) *Resolved {
+	t.Helper()
 	reg := newRegistry(t)
-	input, _ := assemblyFixture(t, d.Kind, "selection", "selection")
-	input.Manifest.Annotations[spec.AnnotationDescriptor] = string(kitJSON(t, d))
+	input, _ := assemblyFixture(t, kind, "selection", "selection")
+	input.Manifest.Annotations[spec.AnnotationDescriptor] = string(raw)
 	manifest, err := json.Marshal(input.Manifest)
 	require.NoError(t, err)
 	config, err := json.Marshal(input.Config)

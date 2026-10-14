@@ -409,17 +409,8 @@ func mergeKits(ctx context.Context, kits []*Kit, args []map[string]string, parti
 		published := publishedByReference[u.Reference]
 		var snapshot *spec.Descriptor
 		if options.retainExpandedDescriptors {
-			// Copy before callbacks can mutate nested maps shared with effective
-			// grants. Decode from serialized declarations to copy every field.
-			raw, err := json.Marshal(u.Descriptor)
-			if err != nil {
-				return nil, fmt.Errorf("%s: copy expanded descriptor", u.Reference)
-			}
-			snapshot, err = spec.Decode(raw)
-			if err != nil {
-				// Decoder details could include expanded environment secrets.
-				return nil, fmt.Errorf("%s: copy expanded descriptor", u.Reference)
-			}
+			// Copy before callbacks can mutate data shared with effective grants.
+			snapshot = cloneExpandedDescriptor(u.Descriptor)
 		}
 		selected, err := spec.SelectCapabilities(ctx, u.Reference, withSelectionSources(u.Descriptor, u.Reference), options.selector)
 		if err != nil {
