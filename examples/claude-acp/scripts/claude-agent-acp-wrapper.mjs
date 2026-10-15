@@ -73,11 +73,7 @@ function cliIsAuthenticated() {
   });
 
   if (probe.status !== 0) return false;
-  try {
-    return JSON.parse(probe.stdout).loggedIn === true;
-  } catch {
-    return false;
-  }
+  return JSON.parse(probe.stdout).loggedIn === true;
 }
 
 function isFalseLoggedOutNotification(line) {

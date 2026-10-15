@@ -42,6 +42,27 @@ exit "${MOCK_STATUS:-0}"
 	return stdout, stderr, probes, err
 }
 
+func TestClaudeACPAuthNotificationFallback(t *testing.T) {
+	const notification = `{"method":"_auth/status_update","params":{"authStatus":{"kind":"none"}}}`
+	adapter := `process.stdout.write(` + "`" + notification + "\n`" + `);
+process.stdin.resume();`
+	for _, tc := range []struct{ name, auth, status, want string }{
+		{"authenticated", `{"loggedIn":true}`, "0", ""},
+		{"logged out", `{"loggedIn":false}`, "0", notification + "\n"},
+		{"malformed", `{`, "0", notification + "\n"},
+		{"null", `null`, "0", notification + "\n"},
+		{"failed probe", `{"loggedIn":true}`, "1", notification + "\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stdout, stderr, probes, err := runClaudeACPWrapper(t, adapter, "", []string{"MOCK_AUTH=" + tc.auth, "MOCK_STATUS=" + tc.status})
+			require.NoError(t, err, stderr)
+			require.Empty(t, stderr)
+			require.Equal(t, tc.want, stdout)
+			require.Equal(t, "auth status --json\n", probes)
+		})
+	}
+}
+
 func TestClaudeACPExitDrainsOutput(t *testing.T) {
 	const adapter = `process.stdin.resume();
 process.stdin.on("end", () => {
