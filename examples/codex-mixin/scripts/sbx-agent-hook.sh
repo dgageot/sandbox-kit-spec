@@ -208,7 +208,7 @@ codex_session_args() { # thread-id
         version: ($meta.cli_version // null),
         context_used_tokens: $used,
         context_window: $win,
-        context_percent: (if ($win != null and $win > 0 and $used != null) then (($used * 100 / $win) | floor) else null end),
+        context_percent: (if ($win > 0 and $used != null) then (($used * 100 / $win) | floor) else null end),
         input_tokens: ($tok.total_token_usage.input_tokens // null),
         output_tokens: ($tok.total_token_usage.output_tokens // null),
         cost_usd: null, duration_ms: null, lines_added: null, lines_removed: null,

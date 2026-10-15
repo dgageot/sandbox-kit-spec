@@ -27,6 +27,31 @@ func runCodexPayload(t *testing.T, kit, records string) (string, string, error) 
 		desktopBuilders(t, kit)+"\ncodex_session_args test\n", "payload-test", "codex", "{}")
 }
 
+func TestCodexContextPercent(t *testing.T) {
+	requireExampleTool(t, "jq")
+	for _, kit := range []string{"claude", "claude-mixin", "codex", "codex-mixin"} {
+		for _, tc := range []struct{ name, window, used, expected string }{
+			{"unknown window", "null", "10", "null"},
+			{"zero window", "0", "10", "null"},
+			{"negative window", "-1", "10", "null"},
+			{"unknown usage", "100", "null", "null"},
+			{"zero usage", "100", "0", "0"},
+			{"rounded down", "300", "10", "3"},
+			{"over capacity", "100", "150", "150"},
+		} {
+			t.Run(kit+"/"+tc.name, func(t *testing.T) {
+				record := `{"type":"event_msg","payload":{"type":"token_count","info":{"model_context_window":` + tc.window + `,"last_token_usage":{"total_tokens":` + tc.used + `}}}}`
+				stdout, stderr, err := runCodexPayload(t, kit, record)
+				require.NoError(t, err, stderr)
+				require.Empty(t, stderr)
+				var payload map[string]json.RawMessage
+				require.NoError(t, json.Unmarshal([]byte(stdout), &payload))
+				require.JSONEq(t, tc.expected, string(payload["context_percent"]))
+			})
+		}
+	}
+}
+
 func TestDesktopNotificationStopFlag(t *testing.T) {
 	requireExampleTool(t, "jq")
 	for _, kit := range []string{"claude", "claude-mixin", "codex", "codex-mixin"} {
