@@ -27,6 +27,25 @@ func runCodexPayload(t *testing.T, kit, records string) (string, string, error) 
 		desktopBuilders(t, kit)+"\ncodex_session_args test\n", "payload-test", "codex", "{}")
 }
 
+func TestDesktopNotificationStopFlag(t *testing.T) {
+	requireExampleTool(t, "jq")
+	for _, kit := range []string{"claude", "claude-mixin", "codex", "codex-mixin"} {
+		for _, value := range []string{"null", "false", "true", "0", "1", `"true"`, "[]", "{}"} {
+			t.Run(kit+"/"+value, func(t *testing.T) {
+				stdout, stderr, err := runExampleCommand(t, nil, `{"stop_hook_active":`+value+`}`, "sh", "-c",
+					desktopBuilders(t, kit)+"\nnotify_args claude\n", "payload-test", "claude")
+				require.NoError(t, err, stderr)
+				require.Empty(t, stderr)
+				var payload struct {
+					Active bool `json:"stop_hook_active"`
+				}
+				require.NoError(t, json.Unmarshal([]byte(stdout), &payload))
+				require.Equal(t, value == "true", payload.Active)
+			})
+		}
+	}
+}
+
 func TestCodexRolloutLastRecords(t *testing.T) {
 	requireExampleTool(t, "jq")
 	for _, kit := range []string{"claude", "claude-mixin", "codex", "codex-mixin"} {

@@ -102,7 +102,7 @@ notify_args() { # agent
       message: (((.last_assistant_message // ."last-assistant-message" // .message // "") | tostring) | .[0:600]),
       title: (.title | str),
       notification_type: (.notification_type | str),
-      stop_hook_active: ((.stop_hook_active // false) == true)
+      stop_hook_active: (.stop_hook_active == true)
     }'
 }
 
