@@ -196,7 +196,7 @@ codex_session_args() { # thread-id
                       or startswith("<skill") or startswith("<collaboration_mode") or startswith("<realtime_") | not))
        | first // null) as $prompt
     | (if $prompt == null then null
-       else ($prompt | split("\n") | map(trim) | map(select(length > 0)) | .[0] // null | if . == null then null else .[0:200] end) end) as $title
+       else ($prompt | split("\n")[0] | trim | .[0:200]) end) as $title
     | {
         agent: "codex",
         session_id: ($meta.id // null),
