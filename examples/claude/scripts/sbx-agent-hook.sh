@@ -179,9 +179,9 @@ codex_session_args() { # thread-id
   jq -n -c '
     def trim: gsub("^\\s+|\\s+$"; "");
     [inputs] as $all
-    | ($all | map(select(.type == "session_meta")) | last | .payload) as $meta
-    | ($all | map(select(.type == "turn_context")) | last | .payload) as $turn
-    | ($all | map(select(.type == "event_msg" and .payload.type == "token_count")) | last | .payload.info) as $tok
+    | ($all | (last(.[] | select(.type == "session_meta")) // null) | .payload) as $meta
+    | ($all | (last(.[] | select(.type == "turn_context")) // null) | .payload) as $turn
+    | ($all | (last(.[] | select(.type == "event_msg" and .payload.type == "token_count")) // null) | .payload.info) as $tok
     | ($tok.model_context_window // null) as $win
     | ($tok.last_token_usage.total_tokens // null) as $used
     # The first user message that is not a block Codex injects itself

@@ -27,6 +27,36 @@ func runCodexPayload(t *testing.T, kit, records string) (string, string, error) 
 		desktopBuilders(t, kit)+"\ncodex_session_args test\n", "payload-test", "codex", "{}")
 }
 
+func TestCodexRolloutLastRecords(t *testing.T) {
+	requireExampleTool(t, "jq")
+	for _, kit := range []string{"claude", "claude-mixin", "codex", "codex-mixin"} {
+		for _, tc := range []struct{ name, records, expected string }{
+			{"empty", "", `{"session_id":null,"model_id":null,"context_used_tokens":null}`},
+			{"last matching records", `{"type":"session_meta","payload":{"id":"old"}}
+{"type":"turn_context","payload":{"model":"old"}}
+{"type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"total_tokens":1}}}}
+{"type":"session_meta","payload":{"id":"new"}}
+{"type":"turn_context","payload":{"model":"new"}}
+{"type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"total_tokens":2}}}}`,
+				`{"session_id":"new","model_id":"new","context_used_tokens":2}`},
+			{"last missing payload", `{"type":"session_meta","payload":{"id":"old"}}
+{"type":"session_meta"}`, `{"session_id":null,"model_id":null,"context_used_tokens":null}`},
+		} {
+			t.Run(kit+"/"+tc.name, func(t *testing.T) {
+				stdout, stderr, err := runCodexPayload(t, kit, tc.records)
+				require.NoError(t, err, stderr)
+				require.Empty(t, stderr)
+				var payload, expected map[string]json.RawMessage
+				require.NoError(t, json.Unmarshal([]byte(stdout), &payload))
+				require.NoError(t, json.Unmarshal([]byte(tc.expected), &expected))
+				for key, value := range expected {
+					require.JSONEq(t, string(value), string(payload[key]))
+				}
+			})
+		}
+	}
+}
+
 func TestCodexRolloutTitleUsesFirstTrimmedLine(t *testing.T) {
 	requireExampleTool(t, "jq")
 	for _, kit := range []string{"claude", "claude-mixin", "codex", "codex-mixin"} {
