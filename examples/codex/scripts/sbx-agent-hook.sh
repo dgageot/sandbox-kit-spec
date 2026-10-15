@@ -76,7 +76,7 @@ mcp_call() { # tool-name arguments-json
         [$body | gsub("\r\n|\r"; "\n") | split("\n\n")[]
          | split("\n") | map(select(startswith("data:"))
                               | .[5:] | ltrimstr(" ")) | join("\n")
-         | select(length > 0) | fromjson?];
+         | fromjson?];
     messages
     | map(select(type == "object" and .jsonrpc == "2.0" and .id == $id))
     | length == 1 and (.[0]
