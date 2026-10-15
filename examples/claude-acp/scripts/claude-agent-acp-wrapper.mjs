@@ -56,9 +56,9 @@ const child = spawn(process.execPath, [adapter, ...process.argv.slice(2)], {
 const exited = new Promise((resolve) => {
   child.once("error", (error) => {
     console.error(`claude-agent-acp: ${error.message}`);
-    resolve({ code: 1, signal: null });
+    resolve(1);
   });
-  child.once("exit", (code, signal) => resolve({ code, signal }));
+  child.once("exit", (code, signal) => resolve(code ?? (signal ? 1 : 0)));
 });
 
 for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
@@ -140,8 +140,8 @@ async function forwardOutput() {
 
 const input = forwardInput();
 const output = forwardOutput();
-const { code, signal } = await exited;
+const exitCode = await exited;
 inputLines.close();
 process.stdin.pause();
 await Promise.all([input, output]);
-process.exitCode = code ?? (signal ? 1 : 0);
+process.exitCode = exitCode;
